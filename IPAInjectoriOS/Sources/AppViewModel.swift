@@ -378,6 +378,19 @@ final class AppViewModel: ObservableObject {
     }
 
     private func isAppStoreApp(_ appURL: URL) -> Bool {
+        let path = appURL.path
+        if path.contains("/Containers/Bundle/Application") || path.contains("/containers/Bundle/Application") {
+            return true
+        }
+        if path.contains("/var/mobile/Containers/Bundle/Application") || path.contains("/private/var/mobile/Containers/Bundle/Application") {
+            return true
+        }
+        if path.contains("/var/jb/var/containers/Bundle/Application") || path.contains("/private/var/jb/var/containers/Bundle/Application") {
+            return true
+        }
+        if path.contains("/var/containers/Bundle/Application") || path.contains("/private/var/containers/Bundle/Application") {
+            return true
+        }
         let receiptURL = appURL.appendingPathComponent("StoreKit/receipt")
         let masReceiptURL = appURL.appendingPathComponent("_MASReceipt/receipt")
         let scInfoURL = appURL.appendingPathComponent("SC_Info")

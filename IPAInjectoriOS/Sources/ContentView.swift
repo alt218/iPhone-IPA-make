@@ -23,14 +23,14 @@ struct ContentView: View {
             .navigationTitle("IPA一括生成")
             .fileImporter(
                 isPresented: $viewModel.isImportingIPA,
-                allowedContentTypes: [ipaType, .data],
+                allowedContentTypes: [ipaType, .item, .data],
                 allowsMultipleSelection: false
             ) { result in
                 viewModel.handleIPAImport(result)
             }
             .fileImporter(
                 isPresented: $viewModel.isImportingIPAFromSheet,
-                allowedContentTypes: [ipaType, .data],
+                allowedContentTypes: [ipaType, .item, .data],
                 allowsMultipleSelection: false
             ) { result in
                 viewModel.handleIPAImport(result)
