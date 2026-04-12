@@ -210,12 +210,13 @@ final class AppViewModel: ObservableObject {
 
             let payloadURL = tempRoot.appendingPathComponent("Payload", isDirectory: true)
             try FileManager.default.createDirectory(at: payloadURL, withIntermediateDirectories: true, attributes: nil)
-            let destAppURL = payloadURL.appendingPathComponent(app.appURL.lastPathComponent)
+            let sourceAppURL = resolveReadableAppURL(for: app.appURL)
+            let destAppURL = payloadURL.appendingPathComponent(sourceAppURL.lastPathComponent)
             exportStatus = "アプリをコピー中..."
             appendLog(exportStatus)
-            appendLog("コピー元: \(app.appURL.path)")
+            appendLog("コピー元: \(sourceAppURL.path)")
             appendLog("コピー先: \(destAppURL.path)")
-            try FileManager.default.copyItem(at: app.appURL, to: destAppURL)
+            try FileManager.default.copyItem(at: sourceAppURL, to: destAppURL)
 
             exportStatus = "IPAを作成中..."
             appendLog(exportStatus)
@@ -515,6 +516,34 @@ final class AppViewModel: ObservableObject {
             }
             index += 1
         }
+    }
+
+    private func resolveReadableAppURL(for original: URL) -> URL {
+        let path = original.path
+        let candidates = appURLCandidates(from: path)
+        for candidatePath in candidates {
+            if FileManager.default.isReadableFile(atPath: candidatePath) {
+                return URL(fileURLWithPath: candidatePath, isDirectory: true)
+            }
+        }
+        return original
+    }
+
+    private func appURLCandidates(from path: String) -> [String] {
+        var results: [String] = [path]
+        let mappings: [(String, String)] = [
+            ("/private/var/containers/Bundle/Application", "/private/var/jb/var/containers/Bundle/Application"),
+            ("/var/containers/Bundle/Application", "/var/jb/var/containers/Bundle/Application"),
+            ("/private/var/mobile/Containers/Bundle/Application", "/private/var/jb/var/mobile/Containers/Bundle/Application"),
+            ("/var/mobile/Containers/Bundle/Application", "/var/jb/var/mobile/Containers/Bundle/Application"),
+            ("/Applications", "/var/jb/Applications"),
+            ("/private/var/Applications", "/private/var/jb/Applications")
+        ]
+        for (src, dst) in mappings where path.hasPrefix(src) {
+            let replaced = path.replacingOccurrences(of: src, with: dst)
+            results.append(replaced)
+        }
+        return results
     }
 
     private func fetchAppsViaLSApplicationWorkspace() -> [InstalledApp] {
