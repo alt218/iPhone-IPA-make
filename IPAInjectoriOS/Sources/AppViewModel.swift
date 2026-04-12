@@ -271,7 +271,11 @@ final class AppViewModel: ObservableObject {
 
         installedApps = unique
         if storeApps.isEmpty {
-            appendLog("App Store判定ができないため、全アプリを表示中: \(installedApps.count) 件")
+            if isLikelyRootlessOnly(apps: installedApps) {
+                appendLog("rootless環境のためApp Store判定不可。脱獄アプリのみ表示中: \(installedApps.count) 件")
+            } else {
+                appendLog("App Store判定ができないため、全アプリを表示中: \(installedApps.count) 件")
+            }
         } else {
             appendLog("App Storeアプリ: \(installedApps.count) 件")
         }
@@ -303,6 +307,9 @@ final class AppViewModel: ObservableObject {
             } else {
                 appendLog("スキャン: \(path) exists=\(exists) count=0 (読み取り不可)")
             }
+        }
+        if isLikelyRootlessOnly(apps: installedApps) {
+            appendLog("診断: rootless の可能性が高いです")
         }
     }
 
@@ -666,6 +673,9 @@ final class AppViewModel: ObservableObject {
 
     private func isAppStoreApp(_ appURL: URL) -> Bool {
         let path = appURL.path
+        if path.hasPrefix("/var/jb/Applications") || path.hasPrefix("/private/var/jb/Applications") {
+            return false
+        }
         if path.contains("/Containers/Bundle/Application") || path.contains("/containers/Bundle/Application") {
             return true
         }
@@ -684,6 +694,19 @@ final class AppViewModel: ObservableObject {
         return FileManager.default.fileExists(atPath: receiptURL.path)
             || FileManager.default.fileExists(atPath: masReceiptURL.path)
             || FileManager.default.fileExists(atPath: scInfoURL.path)
+    }
+
+    private func isLikelyRootlessOnly(apps: [InstalledApp]) -> Bool {
+        guard !apps.isEmpty else { return false }
+        let jbApps = apps.filter {
+            let path = $0.appURL.path
+            return path.hasPrefix("/var/jb/Applications") || path.hasPrefix("/private/var/jb/Applications")
+        }
+        let containerApps = apps.filter {
+            let path = $0.appURL.path
+            return path.contains("/containers/Bundle/Application") || path.contains("/Containers/Bundle/Application")
+        }
+        return !jbApps.isEmpty && containerApps.isEmpty
     }
 
     private func makeInstalledApp(from appURL: URL) -> InstalledApp? {
