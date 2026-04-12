@@ -204,7 +204,7 @@ final class AppViewModel: ObservableObject {
             let fileName = "\(app.name).ipa"
             let destURL = uniqueDestinationURL(in: destDir, name: fileName)
 
-            let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("IPAExtract-\(UUID().uuidString)")
+            let tempRoot = destDir.appendingPathComponent("ExportWork-\(UUID().uuidString)", isDirectory: true)
             try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true, attributes: nil)
             defer { try? FileManager.default.removeItem(at: tempRoot) }
 
@@ -213,6 +213,8 @@ final class AppViewModel: ObservableObject {
             let destAppURL = payloadURL.appendingPathComponent(app.appURL.lastPathComponent)
             exportStatus = "アプリをコピー中..."
             appendLog(exportStatus)
+            appendLog("コピー元: \(app.appURL.path)")
+            appendLog("コピー先: \(destAppURL.path)")
             try FileManager.default.copyItem(at: app.appURL, to: destAppURL)
 
             exportStatus = "IPAを作成中..."
@@ -233,6 +235,8 @@ final class AppViewModel: ObservableObject {
             errorMessage = error.localizedDescription
             exportStatus = "吸い出し失敗: \(error.localizedDescription)"
             appendLog(exportStatus)
+            let nsError = error as NSError
+            appendLog("エラー詳細: domain=\(nsError.domain) code=\(nsError.code)")
             isExportingIPA = false
         }
     }
