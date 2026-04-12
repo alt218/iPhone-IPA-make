@@ -1,11 +1,8 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import UIKit
 
 struct ContentView: View {
     @ObservedObject var viewModel: AppViewModel
-
-    private let dylibType = UTType(filenameExtension: "dylib") ?? .data
 
     var body: some View {
         NavigationStack {
@@ -21,12 +18,12 @@ struct ContentView: View {
                 .padding(16)
             }
             .navigationTitle("IPA一括生成")
-            .fileImporter(
-                isPresented: $viewModel.isImportingDylibs,
-                allowedContentTypes: [dylibType],
-                allowsMultipleSelection: true
-            ) { result in
-                viewModel.handleDylibSelection(result)
+            .sheet(isPresented: $viewModel.isImportingDylibs) {
+                DylibFilePicker { result in
+                    viewModel.isImportingDylibs = false
+                    viewModel.handleDylibSelection(result)
+                }
+                .ignoresSafeArea()
             }
             .sheet(isPresented: $viewModel.isImportingIPA) {
                 IPAFilePicker { result in
@@ -96,7 +93,7 @@ struct ContentView: View {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("dylib")
+                    Text("dylib（任意）")
                         .font(.headline)
                     if viewModel.dylibURLs.isEmpty {
                         Text("dylibが選択されていません")
@@ -349,6 +346,11 @@ struct ContentView: View {
                         viewModel.startIPAImportFromSheet()
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("診断") {
+                        viewModel.appendInstalledAppsDiagnostics()
+                    }
+                }
             }
             .onAppear {
                 viewModel.refreshInstalledApps()
@@ -379,6 +381,39 @@ private struct IPAFilePicker: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: true)
         picker.allowsMultipleSelection = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        private let onPick: (Result<[URL], Error>) -> Void
+
+        init(onPick: @escaping (Result<[URL], Error>) -> Void) {
+            self.onPick = onPick
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            onPick(.success(urls))
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onPick(.success([]))
+        }
+    }
+}
+
+private struct DylibFilePicker: UIViewControllerRepresentable {
+    let onPick: (Result<[URL], Error>) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick)
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
+        picker.allowsMultipleSelection = true
         picker.delegate = context.coordinator
         return picker
     }

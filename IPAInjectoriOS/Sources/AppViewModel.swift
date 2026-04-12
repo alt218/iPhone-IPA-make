@@ -155,6 +155,35 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func appendInstalledAppsDiagnostics() {
+        let roots = [
+            "/Applications",
+            "/var/containers/Bundle/Application",
+            "/private/var/containers/Bundle/Application",
+            "/var/mobile/Containers/Bundle/Application",
+            "/private/var/mobile/Containers/Bundle/Application",
+            "/var/jb/Applications",
+            "/var/jb/containers/Bundle/Application",
+            "/var/jb/Containers/Bundle/Application",
+            "/private/var/jb/Applications",
+            "/private/var/jb/containers/Bundle/Application",
+            "/private/var/jb/Containers/Bundle/Application",
+            "/var/jb/var/containers/Bundle/Application",
+            "/private/var/jb/var/containers/Bundle/Application",
+            "/var/jb/var/mobile/Containers/Bundle/Application",
+            "/private/var/jb/var/mobile/Containers/Bundle/Application"
+        ]
+
+        for path in roots {
+            let exists = FileManager.default.fileExists(atPath: path)
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: path) {
+                appendLog("スキャン: \(path) exists=\(exists) count=\(contents.count)")
+            } else {
+                appendLog("スキャン: \(path) exists=\(exists) count=0 (読み取り不可)")
+            }
+        }
+    }
+
     func exportInstalledAppToIPA(_ app: InstalledApp) {
         do {
             isExportingIPA = true
@@ -231,7 +260,10 @@ final class AppViewModel: ObservableObject {
 
     func handleDylibSelection(_ result: Result<[URL], Error>) {
         do {
-            dylibURLs = try result.get().sorted { $0.lastPathComponent < $1.lastPathComponent }
+            let urls = try result.get()
+            dylibURLs = urls
+                .filter { $0.pathExtension.lowercased() == "dylib" }
+                .sorted { $0.lastPathComponent < $1.lastPathComponent }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -245,11 +277,6 @@ final class AppViewModel: ObservableObject {
 
         guard let ipaURL else {
             errorMessage = "IPAを選択してください。"
-            return
-        }
-
-        guard !dylibURLs.isEmpty else {
-            errorMessage = "dylibを1つ以上選択してください。"
             return
         }
 
