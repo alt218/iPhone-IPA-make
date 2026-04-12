@@ -210,13 +210,12 @@ final class AppViewModel: ObservableObject {
 
             let payloadURL = tempRoot.appendingPathComponent("Payload", isDirectory: true)
             try FileManager.default.createDirectory(at: payloadURL, withIntermediateDirectories: true, attributes: nil)
-            let sourceAppURL = resolveReadableAppURL(for: app.appURL)
-            let destAppURL = payloadURL.appendingPathComponent(sourceAppURL.lastPathComponent)
+            let candidatePaths = appURLCandidates(from: app.appURL.path)
+            let destAppURL = payloadURL.appendingPathComponent(app.appURL.lastPathComponent)
             exportStatus = "アプリをコピー中..."
             appendLog(exportStatus)
-            appendLog("コピー元: \(sourceAppURL.path)")
             appendLog("コピー先: \(destAppURL.path)")
-            try FileManager.default.copyItem(at: sourceAppURL, to: destAppURL)
+            try copyAppBundleWithFallback(fromCandidates: candidatePaths, to: destAppURL)
 
             exportStatus = "IPAを作成中..."
             appendLog(exportStatus)
@@ -518,17 +517,6 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private func resolveReadableAppURL(for original: URL) -> URL {
-        let path = original.path
-        let candidates = appURLCandidates(from: path)
-        for candidatePath in candidates {
-            if FileManager.default.isReadableFile(atPath: candidatePath) {
-                return URL(fileURLWithPath: candidatePath, isDirectory: true)
-            }
-        }
-        return original
-    }
-
     private func appURLCandidates(from path: String) -> [String] {
         var results: [String] = [path]
         let mappings: [(String, String)] = [
@@ -544,6 +532,58 @@ final class AppViewModel: ObservableObject {
             results.append(replaced)
         }
         return results
+    }
+
+    private func copyAppBundleWithFallback(fromCandidates candidates: [String], to destination: URL) throws {
+        var lastError: Error?
+        for candidatePath in candidates {
+            let sourceURL = URL(fileURLWithPath: candidatePath, isDirectory: true)
+            appendLog("コピー元: \(candidatePath)")
+            do {
+                try FileManager.default.copyItem(at: sourceURL, to: destination)
+                return
+            } catch {
+                lastError = error
+                appendLog("コピー失敗（直コピー）: \(error.localizedDescription)")
+                do {
+                    try copyDirectorySkippingUnreadable(from: sourceURL, to: destination)
+                    appendLog("コピー完了（スキップあり）")
+                    return
+                } catch {
+                    lastError = error
+                    appendLog("コピー失敗（スキップ方式）: \(error.localizedDescription)")
+                }
+            }
+        }
+        if let lastError {
+            throw lastError
+        }
+    }
+
+    private func copyDirectorySkippingUnreadable(from source: URL, to destination: URL) throws {
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true, attributes: nil)
+        guard let enumerator = FileManager.default.enumerator(
+            at: source,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        for case let itemURL as URL in enumerator {
+            let relative = itemURL.path.replacingOccurrences(of: source.path, with: "")
+            let targetURL = destination.appendingPathComponent(relative)
+            if itemURL.hasDirectoryPath {
+                try? FileManager.default.createDirectory(at: targetURL, withIntermediateDirectories: true, attributes: nil)
+                continue
+            }
+            do {
+                try FileManager.default.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
+                try FileManager.default.copyItem(at: itemURL, to: targetURL)
+            } catch {
+                appendLog("スキップ: \(relative)")
+            }
+        }
     }
 
     private func fetchAppsViaLSApplicationWorkspace() -> [InstalledApp] {
