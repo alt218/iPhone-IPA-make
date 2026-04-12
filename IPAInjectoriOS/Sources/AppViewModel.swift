@@ -365,8 +365,13 @@ final class AppViewModel: ObservableObject {
             if let workspaceExecutable {
                 appendLog("実行ファイル(LS): \(workspaceExecutable)")
             }
+            let scannedExecutable = resolveExecutableNameByScanning(candidates: candidatePaths)
+            if let scannedExecutable {
+                appendLog("実行ファイル(スキャン): \(scannedExecutable)")
+            }
             let expectedExecutable = workspaceExecutable
                 ?? resolveExecutableName(fromCandidates: candidatePaths)
+                ?? scannedExecutable
                 ?? fallbackExecutable
             if let hidePath = candidatePaths.first(where: { $0.contains("/var/containers/Bundle/Application") || $0.contains("/private/var/containers/Bundle/Application") }) {
                 appendLog("hide環境の可能性: \(hidePath)")
@@ -1018,36 +1023,17 @@ final class AppViewModel: ObservableObject {
         if FileManager.default.fileExists(atPath: destExecURL.path) {
             return true
         }
+        if copyExecutableNamed(expectedExecutable, fromCandidates: candidates, to: destExecURL) {
+            return true
+        }
         for candidatePath in candidates {
-            let sourceExecURL = URL(fileURLWithPath: candidatePath, isDirectory: true).appendingPathComponent(expectedExecutable)
-            if !FileManager.default.fileExists(atPath: sourceExecURL.path) {
-                continue
-            }
-            if !FileManager.default.isReadableFile(atPath: sourceExecURL.path) {
-                appendLog("実行ファイル読み取り不可: \(sourceExecURL.path)")
-            }
-            do {
-                try FileManager.default.createDirectory(
-                    at: destExecURL.deletingLastPathComponent(),
-                    withIntermediateDirectories: true,
-                    attributes: nil
-                )
-                try FileManager.default.copyItem(at: sourceExecURL, to: destExecURL)
-                appendLog("実行ファイルをコピー: \(expectedExecutable)")
-                return true
-            } catch {
-                if copyFileDataOnly(from: sourceExecURL, to: destExecURL) {
-                    appendLog("実行ファイルをコピー(データのみ): \(expectedExecutable)")
+            let appURL = URL(fileURLWithPath: candidatePath, isDirectory: true)
+            let fallbackNames = executableCandidates(in: appURL).filter { $0.lowercased() != expectedExecutable.lowercased() }
+            for name in fallbackNames {
+                let fallbackDest = destAppURL.appendingPathComponent(name)
+                if copyExecutableNamed(name, fromCandidates: [candidatePath], to: fallbackDest) {
+                    appendLog("実行ファイルを代替コピー: \(name)")
                     return true
-                }
-                if let data = try? Data(contentsOf: sourceExecURL) {
-                    do {
-                        try data.write(to: destExecURL)
-                        appendLog("実行ファイルを復元: \(expectedExecutable)")
-                        return true
-                    } catch {
-                        appendLog("実行ファイル復元失敗: \(error.localizedDescription)")
-                    }
                 }
             }
         }
@@ -1119,6 +1105,17 @@ final class AppViewModel: ObservableObject {
         return nil
     }
 
+    private func resolveExecutableNameByScanning(candidates: [String]) -> String? {
+        for candidatePath in candidates {
+            let appURL = URL(fileURLWithPath: candidatePath, isDirectory: true)
+            let names = executableCandidates(in: appURL)
+            if let name = names.first {
+                return name
+            }
+        }
+        return nil
+    }
+
     private func resolveExecutableNameFromWorkspace(bundleId: String) -> String? {
         guard let workspaceClass = NSClassFromString("LSApplicationWorkspace") as? NSObject.Type else {
             return nil
@@ -1139,7 +1136,71 @@ final class AppViewModel: ObservableObject {
            !exec.isEmpty {
             return exec
         }
+        if let exec = proxy.value(forKey: "bundleExecutable") as? String, !exec.isEmpty {
+            return exec
+        }
         return nil
+    }
+
+    private func executableCandidates(in appURL: URL) -> [String] {
+        guard let items = try? FileManager.default.contentsOfDirectory(
+            at: appURL,
+            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .isExecutableKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        var results: [String] = []
+        for item in items {
+            let name = item.lastPathComponent
+            if name == "Info.plist" || name == "PkgInfo" { continue }
+            let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isExecutableKey])
+            if values?.isDirectory == true { continue }
+            if values?.isRegularFile == false { continue }
+            if !name.contains(".") {
+                if values?.isExecutable == true || values?.isExecutable == nil {
+                    results.append(name)
+                }
+            }
+        }
+        return results
+    }
+
+    private func copyExecutableNamed(_ name: String, fromCandidates candidates: [String], to destExecURL: URL) -> Bool {
+        for candidatePath in candidates {
+            let sourceExecURL = URL(fileURLWithPath: candidatePath, isDirectory: true).appendingPathComponent(name)
+            if !FileManager.default.fileExists(atPath: sourceExecURL.path) {
+                continue
+            }
+            if !FileManager.default.isReadableFile(atPath: sourceExecURL.path) {
+                appendLog("実行ファイル読み取り不可: \(sourceExecURL.path)")
+            }
+            do {
+                try FileManager.default.createDirectory(
+                    at: destExecURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
+                try FileManager.default.copyItem(at: sourceExecURL, to: destExecURL)
+                appendLog("実行ファイルをコピー: \(name)")
+                return true
+            } catch {
+                if copyFileDataOnly(from: sourceExecURL, to: destExecURL) {
+                    appendLog("実行ファイルをコピー(データのみ): \(name)")
+                    return true
+                }
+                if let data = try? Data(contentsOf: sourceExecURL) {
+                    do {
+                        try data.write(to: destExecURL)
+                        appendLog("実行ファイルを復元: \(name)")
+                        return true
+                    } catch {
+                        appendLog("実行ファイル復元失敗: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+        return false
     }
 
     private func copyFileDataOnly(from source: URL, to destination: URL) -> Bool {

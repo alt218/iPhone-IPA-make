@@ -10,6 +10,17 @@
 - メイン実行ファイルに `LC_LOAD_DYLIB` を注入
 - アプリ内で処理ログを表示
 - 生成したIPAをそのまま共有
+- メニューから機能のON/OFFを切り替え
+- インストール済みアプリの一覧取得（LSApplicationWorkspace）
+- rootless / hide 環境でのアプリ一覧表示と追加スキャン
+- 一括吸い出し（複数アプリを連続でIPA化）
+- 出力先フォルダの変更
+- 出力ファイル名テンプレート（`{name}` `{bundle}` `{date}` `{id}`）
+- dylibプリセットの保存・適用
+- 吸い出し履歴の保存と再表示
+- 吸い出し時のスキップ一覧ログ出力
+- IPA検証（Payload/Info.plist/実行ファイルの存在チェック）
+- アイコン差し替え用の画像インポート（準備中）
 
 ## 技術スタック
 
@@ -34,6 +45,7 @@ open IPAInjectoriOS.xcodeproj
 2. `iphoneos` 向けにReleaseビルド
 3. `Payload/*.app` を `.ipa` にパッケージ
 4. 生成したIPAをArtifactとしてアップロード
+5. AppIcon用の画像をビルド時に正規化
 
 ## 注意事項
 

@@ -56,7 +56,7 @@ final class IPAProcessor {
             throw IPAProcessorError.bundleIdentifierMissing
         }
 
-        let executableName = try resolveExecutableName(info: originalInfo)
+        let executableName = try resolveExecutableName(info: originalInfo, appBundleURL: appBundleURL)
         let baseName = ipaURL.deletingPathExtension().lastPathComponent
         var outputs: [URL] = []
 
@@ -80,7 +80,12 @@ final class IPAProcessor {
             let dylibDirectoryURL = variantAppURL.appendingPathComponent("dylibs", isDirectory: true)
             try fileManager.createDirectory(at: dylibDirectoryURL, withIntermediateDirectories: true, attributes: nil)
 
-            let executableURL = variantAppURL.appendingPathComponent(executableName)
+            let resolvedExecutableName = resolveExecutableNameInBundle(
+                preferred: executableName,
+                appBundleURL: variantAppURL,
+                infoURL: variantInfoURL
+            )
+            let executableURL = variantAppURL.appendingPathComponent(resolvedExecutableName)
             guard fileManager.fileExists(atPath: executableURL.path) else {
                 throw IPAProcessorError.executableNotFound
             }
@@ -135,11 +140,57 @@ final class IPAProcessor {
         try data.write(to: url)
     }
 
-    private func resolveExecutableName(info: [String: Any]) throws -> String {
-        guard let executableName = info["CFBundleExecutable"] as? String, !executableName.isEmpty else {
-            throw IPAProcessorError.executableNotFound
+    private func resolveExecutableName(info: [String: Any], appBundleURL: URL) throws -> String {
+        if let executableName = info["CFBundleExecutable"] as? String, !executableName.isEmpty {
+            let executableURL = appBundleURL.appendingPathComponent(executableName)
+            if fileManager.fileExists(atPath: executableURL.path) {
+                return executableName
+            }
         }
-        return executableName
+        if let scanned = scanExecutableName(in: appBundleURL) {
+            return scanned
+        }
+        throw IPAProcessorError.executableNotFound
+    }
+
+    private func resolveExecutableNameInBundle(preferred: String, appBundleURL: URL, infoURL: URL) -> String {
+        let preferredURL = appBundleURL.appendingPathComponent(preferred)
+        if fileManager.fileExists(atPath: preferredURL.path) {
+            return preferred
+        }
+        if let scanned = scanExecutableName(in: appBundleURL) {
+            updateExecutableName(scanned, infoURL: infoURL)
+            return scanned
+        }
+        return preferred
+    }
+
+    private func scanExecutableName(in appBundleURL: URL) -> String? {
+        guard let items = try? fileManager.contentsOfDirectory(
+            at: appBundleURL,
+            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .isExecutableKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+        for item in items {
+            let name = item.lastPathComponent
+            if name == "Info.plist" || name == "PkgInfo" { continue }
+            let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isExecutableKey])
+            if values?.isDirectory == true { continue }
+            if values?.isRegularFile == false { continue }
+            if name.contains(".") { continue }
+            if values?.isExecutable == true || values?.isExecutable == nil {
+                return name
+            }
+        }
+        return nil
+    }
+
+    private func updateExecutableName(_ name: String, infoURL: URL) {
+        guard var info = try? loadPlist(at: infoURL) else { return }
+        info["CFBundleExecutable"] = name
+        try? savePlist(info, to: infoURL)
     }
 
     private func sanitizeSuffix(_ value: String) -> String {
