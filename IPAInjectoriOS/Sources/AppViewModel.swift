@@ -117,6 +117,14 @@ final class AppViewModel: ObservableObject {
 
     func refreshInstalledApps() {
         installedApps = []
+
+        let workspaceApps = fetchAppsViaLSApplicationWorkspace()
+        if !workspaceApps.isEmpty {
+            installedApps = workspaceApps
+            appendLog("LSApplicationWorkspace: \(installedApps.count) 件")
+            return
+        }
+
         let roots = [
             URL(fileURLWithPath: "/Applications", isDirectory: true),
             URL(fileURLWithPath: "/var/containers/Bundle/Application", isDirectory: true),
@@ -261,9 +269,25 @@ final class AppViewModel: ObservableObject {
     func handleDylibSelection(_ result: Result<[URL], Error>) {
         do {
             let urls = try result.get()
-            dylibURLs = urls
-                .filter { $0.pathExtension.lowercased() == "dylib" }
-                .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            if urls.isEmpty {
+                dylibURLs = []
+                return
+            }
+            let destDir = dylibStorageDirectory()
+            try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
+            var copied: [URL] = []
+            for url in urls where url.pathExtension.lowercased() == "dylib" {
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer {
+                    if accessed {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+                let destURL = uniqueDestinationURL(in: destDir, name: url.lastPathComponent)
+                try FileManager.default.copyItem(at: url, to: destURL)
+                copied.append(destURL)
+            }
+            dylibURLs = copied.sorted { $0.lastPathComponent < $1.lastPathComponent }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -450,6 +474,11 @@ final class AppViewModel: ObservableObject {
         return documents.appendingPathComponent("ImportedIPAs", isDirectory: true)
     }
 
+    private func dylibStorageDirectory() -> URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documents.appendingPathComponent("ImportedDylibs", isDirectory: true)
+    }
+
     private func uniqueDestinationURL(in directory: URL, name: String) -> URL {
         let baseURL = directory.appendingPathComponent(name)
         if !FileManager.default.fileExists(atPath: baseURL.path) {
@@ -465,6 +494,36 @@ final class AppViewModel: ObservableObject {
             }
             index += 1
         }
+    }
+
+    private func fetchAppsViaLSApplicationWorkspace() -> [InstalledApp] {
+        guard let workspaceClass = NSClassFromString("LSApplicationWorkspace") as? NSObject.Type else {
+            return []
+        }
+        let selector = NSSelectorFromString("defaultWorkspace")
+        guard workspaceClass.responds(to: selector) else { return [] }
+        guard let workspace = workspaceClass.perform(selector)?.takeUnretainedValue() as? NSObject else {
+            return []
+        }
+        let allSelector = NSSelectorFromString("allApplications")
+        guard workspace.responds(to: allSelector) else { return [] }
+        guard let appList = workspace.perform(allSelector)?.takeUnretainedValue() as? [NSObject] else {
+            return []
+        }
+
+        var results: [InstalledApp] = []
+        for app in appList {
+            let idSel = NSSelectorFromString("applicationIdentifier")
+            let nameSel = NSSelectorFromString("localizedName")
+            let urlSel = NSSelectorFromString("bundleURL")
+
+            guard let bundleId = app.perform(idSel)?.takeUnretainedValue() as? String else { continue }
+            let name = (app.perform(nameSel)?.takeUnretainedValue() as? String) ?? bundleId
+            guard let bundleURL = app.perform(urlSel)?.takeUnretainedValue() as? URL else { continue }
+            results.append(InstalledApp(id: bundleId, name: name, bundleId: bundleId, appURL: bundleURL))
+        }
+
+        return results.sorted { $0.name < $1.name }
     }
 
     private func appendLog(_ line: String) {

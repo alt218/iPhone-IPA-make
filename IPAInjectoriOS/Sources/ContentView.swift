@@ -1,8 +1,11 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @ObservedObject var viewModel: AppViewModel
+
+    private let dylibType = UTType(filenameExtension: "dylib") ?? .data
 
     var body: some View {
         NavigationStack {
@@ -412,7 +415,8 @@ private struct DylibFilePicker: UIViewControllerRepresentable {
     }
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
+        let dylibType = UTType(filenameExtension: "dylib") ?? .data
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [dylibType], asCopy: false)
         picker.allowsMultipleSelection = true
         picker.delegate = context.coordinator
         return picker
