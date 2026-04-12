@@ -98,7 +98,8 @@ final class AppViewModel: ObservableObject {
     @Published var logText = ""
     @Published var generatedFiles: [URL] = []
 
-    var outputDirectoryURL: URL
+    var outputDirectoryURL: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("GeneratedIPAs", isDirectory: true)
 
     private let settings = SettingsStore()
 
