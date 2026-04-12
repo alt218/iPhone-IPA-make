@@ -907,6 +907,11 @@ final class AppViewModel: ObservableObject {
             } catch {
                 lastError = error
                 appendLog("コピー失敗（直コピー）: \(error.localizedDescription)")
+                if attemptRootCopy(from: sourceURL, to: destination) {
+                    detectedExecutable = guessExecutableName(in: sourceURL)
+                    appendLog("コピー完了（root）")
+                    return (skippedFiles, detectedExecutable)
+                }
                 do {
                     skippedFiles = try copyDirectorySkippingUnreadable(
                         from: sourceURL,
@@ -1235,6 +1240,57 @@ final class AppViewModel: ObservableObject {
         }
         let result = copyfile(source.path, destination.path, nil, copyfile_flags_t(COPYFILE_DATA))
         return result == 0
+    }
+
+    private func attemptRootCopy(from source: URL, to destination: URL) -> Bool {
+        let suPaths = ["/var/jb/usr/bin/su", "/usr/bin/su", "/bin/su"]
+        guard let suPath = suPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            appendLog("rootコピー不可: su が見つかりません")
+            return false
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        } catch {
+            appendLog("rootコピー準備失敗: \(error.localizedDescription)")
+            return false
+        }
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try? FileManager.default.removeItem(at: destination)
+        }
+        let command = "cp -a \(shellEscape(source.path)) \(shellEscape(destination.path))"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: suPath)
+        process.arguments = ["-c", command]
+        let output = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = output
+        process.standardError = errorPipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            appendLog("rootコピー失敗: \(error.localizedDescription)")
+            return false
+        }
+        let stderr = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        if process.terminationStatus == 0 {
+            return true
+        }
+        if !stderr.isEmpty {
+            appendLog("rootコピー失敗: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+        } else {
+            appendLog("rootコピー失敗: code=\(process.terminationStatus)")
+        }
+        return false
+    }
+
+    private func shellEscape(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(of: "'", with: "'\"'\"'")
+        return "'\(escaped)'"
     }
 
     private func writeSkippedFilesLog(for appName: String, skipped: [String], in directory: URL) throws -> URL {

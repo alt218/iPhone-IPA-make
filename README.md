@@ -22,6 +22,10 @@
 - IPA検証（Payload/Info.plist/実行ファイルの存在チェック）
 - アイコン差し替え用の画像インポート（準備中）
 
+##　サポート環境
+- IOS15以上
+- rootless roothide 未脱獄
+
 ## 技術スタック
 
 - UI: SwiftUI
