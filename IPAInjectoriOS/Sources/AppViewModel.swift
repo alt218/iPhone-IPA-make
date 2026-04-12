@@ -571,7 +571,7 @@ final class AppViewModel: ObservableObject {
         }
 
         for case let itemURL as URL in enumerator {
-            let relative = itemURL.path.replacingOccurrences(of: source.path, with: "")
+            let relative = relativePath(from: source, to: itemURL)
             let targetURL = destination.appendingPathComponent(relative)
             if itemURL.hasDirectoryPath {
                 try? FileManager.default.createDirectory(at: targetURL, withIntermediateDirectories: true, attributes: nil)
@@ -584,6 +584,19 @@ final class AppViewModel: ObservableObject {
                 appendLog("スキップ: \(relative)")
             }
         }
+    }
+
+    private func relativePath(from base: URL, to item: URL) -> String {
+        let basePath = base.path
+        let itemPath = item.path
+        if itemPath == basePath {
+            return ""
+        }
+        if itemPath.hasPrefix(basePath + "/") {
+            let start = itemPath.index(itemPath.startIndex, offsetBy: basePath.count + 1)
+            return String(itemPath[start...])
+        }
+        return item.lastPathComponent
     }
 
     private func fetchAppsViaLSApplicationWorkspace() -> [InstalledApp] {
