@@ -96,11 +96,17 @@ final class AppViewModel: ObservableObject {
     }
 
     func startIPAImportFromSheet() {
-        isImportingIPAFromSheet = true
+        isImportingIPAFromSheet = false
+        DispatchQueue.main.async {
+            self.isImportingIPAFromSheet = true
+        }
     }
 
     func startIPAImport() {
-        isImportingIPA = true
+        isImportingIPA = false
+        DispatchQueue.main.async {
+            self.isImportingIPA = true
+        }
     }
 
     func refreshInstalledApps() {
@@ -130,12 +136,17 @@ final class AppViewModel: ObservableObject {
         }
 
         let storeApps = apps.filter { isAppStoreApp($0.appURL) }
-        let unique = Dictionary(grouping: storeApps, by: { $0.bundleId })
+        let base = storeApps.isEmpty ? apps : storeApps
+        let unique = Dictionary(grouping: base, by: { $0.bundleId })
             .compactMap { $0.value.first }
             .sorted { $0.name < $1.name }
 
         installedApps = unique
-        appendLog("アプリ一覧: \(installedApps.count) 件")
+        if storeApps.isEmpty {
+            appendLog("App Store判定ができないため、全アプリを表示中: \(installedApps.count) 件")
+        } else {
+            appendLog("App Storeアプリ: \(installedApps.count) 件")
+        }
     }
 
     func exportInstalledAppToIPA(_ app: InstalledApp) {
