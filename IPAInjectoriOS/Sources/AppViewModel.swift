@@ -1060,7 +1060,17 @@ final class AppViewModel: ObservableObject {
             guard let bundleId = app.perform(idSel)?.takeUnretainedValue() as? String else { continue }
             let name = (app.perform(nameSel)?.takeUnretainedValue() as? String) ?? bundleId
             guard let bundleURL = app.perform(urlSel)?.takeUnretainedValue() as? URL else { continue }
-            results.append(InstalledApp(id: bundleId, name: name, bundleId: bundleId, appURL: bundleURL))
+            let lastModified = (try? bundleURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            results.append(
+                InstalledApp(
+                    id: bundleId,
+                    name: name,
+                    bundleId: bundleId,
+                    appURL: bundleURL,
+                    lastModified: lastModified,
+                    sizeBytes: nil
+                )
+            )
         }
 
         return results.sorted { $0.name < $1.name }
