@@ -20,6 +20,12 @@ enum GenerationMode: String, CaseIterable, Identifiable {
 
 @MainActor
 final class AppViewModel: ObservableObject {
+    struct HistoryItem: Identifiable {
+        let id = UUID()
+        let date: Date
+        let message: String
+    }
+
     struct InstalledApp: Identifiable {
         let id: String
         let name: String

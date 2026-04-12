@@ -247,155 +247,179 @@ struct ContentView: View {
     }
 
     private var ipaListSheet: some View {
-        NavigationStack {
-            List {
-                if viewModel.availableIPAs.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("IPAが見つかりません")
-                            .foregroundStyle(.secondary)
-                        Button("ファイルから追加") {
-                            viewModel.startIPAImportFromSheet()
-                        }
-                    }
-                } else {
-                    ForEach(viewModel.availableIPAs, id: \.path) { url in
-                        HStack {
-                            Button {
-                                viewModel.selectIPA(url)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(url.lastPathComponent)
-                                        .lineLimit(1)
-                                    Text(url.deletingLastPathComponent().path)
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            Spacer()
-                            Button("削除") {
-                                viewModel.requestDeleteIPA(url)
-                            }
-                        }
-                    }
+        Group {
+            if #available(iOS 16.0, *) {
+                NavigationStack {
+                    ipaListContent
                 }
-            }
-            .navigationTitle("IPA一覧")
-            .confirmationDialog(
-                "削除しますか？",
-                isPresented: $viewModel.isConfirmingDelete,
-                titleVisibility: .visible
-            ) {
-                Button("削除", role: .destructive) {
-                    viewModel.confirmDeleteIPA()
+            } else {
+                NavigationView {
+                    ipaListContent
                 }
-                Button("キャンセル", role: .cancel) {
-                    viewModel.cancelDeleteIPA()
-                }
-            } message: {
-                if let url = viewModel.pendingDeleteIPA {
-                    Text(url.lastPathComponent)
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("閉じる") {
-                        viewModel.isSelectingIPAList = false
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("追加") {
-                        viewModel.startIPAImportFromSheet()
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("更新") {
-                        viewModel.refreshAvailableIPAs()
-                    }
-                }
-            }
-            .onAppear {
-                viewModel.refreshAvailableIPAs()
             }
         }
     }
 
-    private var installedAppsSheet: some View {
-        NavigationStack {
-            List {
-                HStack {
-                    Image(systemName: "magnifyingglass")
+    private var ipaListContent: some View {
+        List {
+            if viewModel.availableIPAs.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("IPAが見つかりません")
                         .foregroundStyle(.secondary)
-                    TextField("検索（アプリ名 / Bundle ID）", text: $viewModel.installedAppsQuery)
-                        .textFieldStyle(.roundedBorder)
-                }
-                .padding(.vertical, 4)
-
-                if viewModel.installedApps.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("アプリ一覧を取得できません")
-                            .foregroundStyle(.secondary)
-                        Text("脱獄環境でのみ表示されます。")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Button("再読み込み") {
-                            viewModel.refreshInstalledApps()
-                        }
-                    }
-                } else {
-                    ForEach(viewModel.filteredInstalledApps()) { app in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(app.name)
-                                .lineLimit(1)
-                            Text(app.bundleId)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                            Button("IPAとして吸い出す") {
-                                viewModel.exportInstalledAppToIPA(app)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-            }
-            .navigationTitle("インストール済みアプリ")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("閉じる") {
-                        viewModel.isSelectingInstalledApps = false
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("更新") {
-                        viewModel.refreshInstalledApps()
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("ファイルから追加") {
                         viewModel.startIPAImportFromSheet()
                     }
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("診断") {
-                        viewModel.appendInstalledAppsDiagnostics()
+            } else {
+                ForEach(viewModel.availableIPAs, id: \.path) { url in
+                    HStack {
+                        Button {
+                            viewModel.selectIPA(url)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(url.lastPathComponent)
+                                    .lineLimit(1)
+                                Text(url.deletingLastPathComponent().path)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        Spacer()
+                        Button("削除") {
+                            viewModel.requestDeleteIPA(url)
+                        }
                     }
                 }
             }
-            .onAppear {
-                viewModel.refreshInstalledApps()
+        }
+        .navigationTitle("IPA一覧")
+        .confirmationDialog(
+            "削除しますか？",
+            isPresented: $viewModel.isConfirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("削除", role: .destructive) {
+                viewModel.confirmDeleteIPA()
             }
-            .overlay {
-                if viewModel.isExportingIPA {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text(viewModel.exportStatus.isEmpty ? "吸い出し中..." : viewModel.exportStatus)
+            Button("キャンセル", role: .cancel) {
+                viewModel.cancelDeleteIPA()
+            }
+        } message: {
+            if let url = viewModel.pendingDeleteIPA {
+                Text(url.lastPathComponent)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("閉じる") {
+                    viewModel.isSelectingIPAList = false
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("追加") {
+                    viewModel.startIPAImportFromSheet()
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("更新") {
+                    viewModel.refreshAvailableIPAs()
+                }
+            }
+        }
+        .onAppear {
+            viewModel.refreshAvailableIPAs()
+        }
+    }
+
+    private var installedAppsSheet: some View {
+        Group {
+            if #available(iOS 16.0, *) {
+                NavigationStack {
+                    installedAppsContent
+                }
+            } else {
+                NavigationView {
+                    installedAppsContent
+                }
+            }
+        }
+    }
+
+    private var installedAppsContent: some View {
+        List {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("検索（アプリ名 / Bundle ID）", text: $viewModel.installedAppsQuery)
+                    .textFieldStyle(.roundedBorder)
+            }
+            .padding(.vertical, 4)
+
+            if viewModel.installedApps.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("アプリ一覧を取得できません")
+                        .foregroundStyle(.secondary)
+                    Text("脱獄環境でのみ表示されます。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Button("再読み込み") {
+                        viewModel.refreshInstalledApps()
+                    }
+                }
+            } else {
+                ForEach(viewModel.filteredInstalledApps()) { app in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(app.name)
+                            .lineLimit(1)
+                        Text(app.bundleId)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Button("IPAとして吸い出す") {
+                            viewModel.exportInstalledAppToIPA(app)
+                        }
                     }
-                    .padding(16)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.vertical, 4)
                 }
+            }
+        }
+        .navigationTitle("インストール済みアプリ")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("閉じる") {
+                    viewModel.isSelectingInstalledApps = false
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("更新") {
+                    viewModel.refreshInstalledApps()
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("ファイルから追加") {
+                    viewModel.startIPAImportFromSheet()
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("診断") {
+                    viewModel.appendInstalledAppsDiagnostics()
+                }
+            }
+        }
+        .onAppear {
+            viewModel.refreshInstalledApps()
+        }
+        .overlay {
+            if viewModel.isExportingIPA {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text(viewModel.exportStatus.isEmpty ? "吸い出し中..." : viewModel.exportStatus)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(16)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
         }
     }
