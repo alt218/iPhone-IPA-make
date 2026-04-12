@@ -907,7 +907,7 @@ final class AppViewModel: ObservableObject {
             } catch {
                 lastError = error
                 appendLog("コピー失敗（直コピー）: \(error.localizedDescription)")
-                if attemptRootCopy(from: sourceURL, to: destination) {
+                if requestRootCopy(from: sourceURL, to: destination) {
                     detectedExecutable = guessExecutableName(in: sourceURL)
                     appendLog("コピー完了（root）")
                     return (skippedFiles, detectedExecutable)
@@ -1242,55 +1242,76 @@ final class AppViewModel: ObservableObject {
         return result == 0
     }
 
-    private func attemptRootCopy(from source: URL, to destination: URL) -> Bool {
-        let suPaths = ["/var/jb/usr/bin/su", "/usr/bin/su", "/bin/su"]
-        guard let suPath = suPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
-            appendLog("rootコピー不可: su が見つかりません")
+    private func requestRootCopy(from source: URL, to destination: URL) -> Bool {
+        guard let requestURL = writeRootCopyRequest(from: source, to: destination) else {
             return false
         }
+        appendLog("rootコピー要求: \(requestURL.path)")
+        appendLog("rootコピー待機中...")
+        return waitForRootCopyResult(id: requestURL.deletingPathExtension().lastPathComponent)
+    }
+
+    private func writeRootCopyRequest(from source: URL, to destination: URL) -> URL? {
+        let requestsDir = rootCopyRequestsDirectory()
         do {
-            try FileManager.default.createDirectory(
-                at: destination.deletingLastPathComponent(),
-                withIntermediateDirectories: true,
-                attributes: nil
-            )
+            try FileManager.default.createDirectory(at: requestsDir, withIntermediateDirectories: true, attributes: nil)
         } catch {
-            appendLog("rootコピー準備失敗: \(error.localizedDescription)")
-            return false
+            appendLog("rootコピー要求作成失敗: \(error.localizedDescription)")
+            return nil
         }
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try? FileManager.default.removeItem(at: destination)
-        }
-        let command = "cp -a \(shellEscape(source.path)) \(shellEscape(destination.path))"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: suPath)
-        process.arguments = ["-c", command]
-        let output = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = output
-        process.standardError = errorPipe
+        let id = UUID().uuidString
+        let requestURL = requestsDir.appendingPathComponent("\(id).txt")
+        let body = [
+            "id=\(id)",
+            "source=\(source.path)",
+            "destination=\(destination.path)"
+        ].joined(separator: "\n")
         do {
-            try process.run()
-            process.waitUntilExit()
+            try body.write(to: requestURL, atomically: true, encoding: .utf8)
+            return requestURL
         } catch {
-            appendLog("rootコピー失敗: \(error.localizedDescription)")
-            return false
+            appendLog("rootコピー要求作成失敗: \(error.localizedDescription)")
+            return nil
         }
-        let stderr = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        if process.terminationStatus == 0 {
-            return true
+    }
+
+    private func waitForRootCopyResult(id: String) -> Bool {
+        let resultsDir = rootCopyResultsDirectory()
+        let resultURL = resultsDir.appendingPathComponent("\(id).txt")
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline {
+            if let text = try? String(contentsOf: resultURL, encoding: .utf8) {
+                let lines = text.split(separator: "\n")
+                var status: String?
+                var message: String?
+                for line in lines {
+                    if line.hasPrefix("status=") {
+                        status = String(line.dropFirst("status=".count))
+                    } else if line.hasPrefix("message=") {
+                        message = String(line.dropFirst("message=".count))
+                    }
+                }
+                if status == "ok" {
+                    return true
+                }
+                let detail = message ?? "unknown"
+                appendLog("rootコピー失敗: \(detail)")
+                return false
+            }
+            Thread.sleep(forTimeInterval: 0.5)
         }
-        if !stderr.isEmpty {
-            appendLog("rootコピー失敗: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
-        } else {
-            appendLog("rootコピー失敗: code=\(process.terminationStatus)")
-        }
+        appendLog("rootコピー失敗: タイムアウト")
         return false
     }
 
-    private func shellEscape(_ value: String) -> String {
-        let escaped = value.replacingOccurrences(of: "'", with: "'\"'\"'")
-        return "'\(escaped)'"
+    private func rootCopyRequestsDirectory() -> URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documents.appendingPathComponent("RootCopyRequests", isDirectory: true)
+    }
+
+    private func rootCopyResultsDirectory() -> URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documents.appendingPathComponent("RootCopyResults", isDirectory: true)
     }
 
     private func writeSkippedFilesLog(for appName: String, skipped: [String], in directory: URL) throws -> URL {
