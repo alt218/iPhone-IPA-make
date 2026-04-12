@@ -379,6 +379,9 @@ final class AppViewModel: ObservableObject {
                     appendLog("警告: Info.plist を取得できませんでした")
                 }
             }
+            if let detectedExecutable, !ensureExecutable(for: destAppURL, fromCandidates: candidatePaths, expectedExecutable: detectedExecutable) {
+                appendLog("警告: 実行ファイルをコピーできませんでした: \(detectedExecutable)")
+            }
             var skippedLogURL: URL?
             if !skipped.isEmpty {
                 let logURL = try writeSkippedFilesLog(for: app.name, skipped: skipped, in: destDir)
@@ -936,7 +939,7 @@ final class AppViewModel: ObservableObject {
                 try FileManager.default.copyItem(at: itemURL, to: targetURL)
             } catch {
                 if let expectedExecutable,
-                   itemURL.lastPathComponent == expectedExecutable,
+                   itemURL.lastPathComponent.lowercased() == expectedExecutable.lowercased(),
                    let data = try? Data(contentsOf: itemURL) {
                     do {
                         try FileManager.default.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
@@ -986,6 +989,44 @@ final class AppViewModel: ObservableObject {
                     return true
                 } catch {
                     appendLog("Info.plist 復元失敗: \(error.localizedDescription)")
+                }
+            }
+        }
+        return false
+    }
+
+    private func ensureExecutable(
+        for destAppURL: URL,
+        fromCandidates candidates: [String],
+        expectedExecutable: String
+    ) -> Bool {
+        let destExecURL = destAppURL.appendingPathComponent(expectedExecutable)
+        if FileManager.default.fileExists(atPath: destExecURL.path) {
+            return true
+        }
+        for candidatePath in candidates {
+            let sourceExecURL = URL(fileURLWithPath: candidatePath, isDirectory: true).appendingPathComponent(expectedExecutable)
+            if !FileManager.default.fileExists(atPath: sourceExecURL.path) {
+                continue
+            }
+            do {
+                try FileManager.default.createDirectory(
+                    at: destExecURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
+                try FileManager.default.copyItem(at: sourceExecURL, to: destExecURL)
+                appendLog("実行ファイルをコピー: \(expectedExecutable)")
+                return true
+            } catch {
+                if let data = try? Data(contentsOf: sourceExecURL) {
+                    do {
+                        try data.write(to: destExecURL)
+                        appendLog("実行ファイルを復元: \(expectedExecutable)")
+                        return true
+                    } catch {
+                        appendLog("実行ファイル復元失敗: \(error.localizedDescription)")
+                    }
                 }
             }
         }
