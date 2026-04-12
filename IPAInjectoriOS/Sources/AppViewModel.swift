@@ -267,6 +267,9 @@ final class AppViewModel: ObservableObject {
             appendLog(exportStatus)
             appendLog("コピー先: \(destAppURL.path)")
             let skipped = try copyAppBundleWithFallback(fromCandidates: candidatePaths, to: destAppURL)
+            if !ensureInfoPlist(for: destAppURL, fromCandidates: candidatePaths) {
+                appendLog("警告: Info.plist を取得できませんでした")
+            }
             if !skipped.isEmpty {
                 let logURL = try writeSkippedFilesLog(for: app.name, skipped: skipped, in: destDir)
                 appendLog("スキップ一覧を書き出しました: \(logURL.lastPathComponent)")
@@ -657,6 +660,31 @@ final class AppViewModel: ObservableObject {
             return String(itemPath[start...])
         }
         return item.lastPathComponent
+    }
+
+    private func ensureInfoPlist(for destAppURL: URL, fromCandidates candidates: [String]) -> Bool {
+        let destInfoURL = destAppURL.appendingPathComponent("Info.plist")
+        if FileManager.default.fileExists(atPath: destInfoURL.path) {
+            return true
+        }
+        for candidatePath in candidates {
+            let sourceInfoURL = URL(fileURLWithPath: candidatePath, isDirectory: true).appendingPathComponent("Info.plist")
+            if let data = try? Data(contentsOf: sourceInfoURL) {
+                do {
+                    try FileManager.default.createDirectory(
+                        at: destInfoURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true,
+                        attributes: nil
+                    )
+                    try data.write(to: destInfoURL)
+                    appendLog("Info.plist を復元しました")
+                    return true
+                } catch {
+                    appendLog("Info.plist 復元失敗: \(error.localizedDescription)")
+                }
+            }
+        }
+        return false
     }
 
     private func writeSkippedFilesLog(for appName: String, skipped: [String], in directory: URL) throws -> URL {
