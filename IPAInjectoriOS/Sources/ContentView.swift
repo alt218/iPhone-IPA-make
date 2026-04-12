@@ -1,10 +1,10 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 struct ContentView: View {
     @ObservedObject var viewModel: AppViewModel
 
-    private let ipaType = UTType(filenameExtension: "ipa") ?? .data
     private let dylibType = UTType(filenameExtension: "dylib") ?? .data
 
     var body: some View {
@@ -22,25 +22,18 @@ struct ContentView: View {
             }
             .navigationTitle("IPA一括生成")
             .fileImporter(
-                isPresented: $viewModel.isImportingIPA,
-                allowedContentTypes: [ipaType, .item, .data],
-                allowsMultipleSelection: false
-            ) { result in
-                viewModel.handleIPAImport(result)
-            }
-            .fileImporter(
-                isPresented: $viewModel.isImportingIPAFromSheet,
-                allowedContentTypes: [ipaType, .item, .data],
-                allowsMultipleSelection: false
-            ) { result in
-                viewModel.handleIPAImport(result)
-            }
-            .fileImporter(
                 isPresented: $viewModel.isImportingDylibs,
                 allowedContentTypes: [dylibType],
                 allowsMultipleSelection: true
             ) { result in
                 viewModel.handleDylibSelection(result)
+            }
+            .sheet(isPresented: $viewModel.isImportingIPA) {
+                IPAFilePicker { result in
+                    viewModel.isImportingIPA = false
+                    viewModel.handleIPAImport(result)
+                }
+                .ignoresSafeArea()
             }
             .sheet(isPresented: $viewModel.isSelectingIPAList) {
                 ipaListSheet
@@ -372,6 +365,39 @@ struct ContentView: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
+        }
+    }
+}
+
+private struct IPAFilePicker: UIViewControllerRepresentable {
+    let onPick: (Result<[URL], Error>) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick)
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: true)
+        picker.allowsMultipleSelection = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        private let onPick: (Result<[URL], Error>) -> Void
+
+        init(onPick: @escaping (Result<[URL], Error>) -> Void) {
+            self.onPick = onPick
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            onPick(.success(urls))
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onPick(.success([]))
         }
     }
 }

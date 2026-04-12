@@ -41,7 +41,6 @@ final class AppViewModel: ObservableObject {
         didSet { settings.save(suffixInput: suffixInput) }
     }
     @Published var isImportingIPA = false
-    @Published var isImportingIPAFromSheet = false
     @Published var isSelectingIPAList = false
     @Published var isSelectingInstalledApps = false
     @Published var isImportingDylibs = false
@@ -84,6 +83,12 @@ final class AppViewModel: ObservableObject {
     func handleIPAImport(_ result: Result<[URL], Error>) {
         do {
             guard let sourceURL = try result.get().first else { return }
+            let accessed = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if accessed {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
+            }
             let destDir = ipaStorageDirectory()
             try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
             let destURL = uniqueDestinationURL(in: destDir, name: sourceURL.lastPathComponent)
@@ -96,9 +101,10 @@ final class AppViewModel: ObservableObject {
     }
 
     func startIPAImportFromSheet() {
-        isImportingIPAFromSheet = false
-        DispatchQueue.main.async {
-            self.isImportingIPAFromSheet = true
+        isSelectingIPAList = false
+        isSelectingInstalledApps = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.isImportingIPA = true
         }
     }
 
