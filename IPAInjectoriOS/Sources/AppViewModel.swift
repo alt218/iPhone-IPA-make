@@ -334,9 +334,11 @@ final class AppViewModel: ObservableObject {
             exportStatus = "アプリをコピー中..."
             appendLog(exportStatus)
             appendLog("コピー先: \(destAppURL.path)")
-            let skipped = try copyAppBundleWithFallback(fromCandidates: candidatePaths, to: destAppURL)
+            let copyResult = try copyAppBundleWithFallback(fromCandidates: candidatePaths, to: destAppURL)
+            let skipped = copyResult.skippedFiles
+            let detectedExecutable = copyResult.detectedExecutable
             if !ensureInfoPlist(for: destAppURL, fromCandidates: candidatePaths) {
-                if writeFallbackInfoPlist(for: destAppURL, app: app) {
+                if writeFallbackInfoPlist(for: destAppURL, app: app, executableName: detectedExecutable) {
                     appendLog("Info.plist を暫定生成しました")
                 } else {
                     appendLog("警告: Info.plist を取得できませんでした")
@@ -372,7 +374,7 @@ final class AppViewModel: ObservableObject {
             refreshAvailableIPAs()
             selectIPA(destURL)
             if enableValidation {
-                let warnings = validateIPA(at: destURL)
+                let warnings = validateIPA(at: destURL, expectedExecutable: detectedExecutable)
                 if warnings.isEmpty {
                     appendLog("IPA検証: OK")
                 } else {
@@ -677,6 +679,9 @@ final class AppViewModel: ObservableObject {
             return false
         }
         if path.contains("/Containers/Bundle/Application") || path.contains("/containers/Bundle/Application") {
+            if isRootlessEnvironment() {
+                return false
+            }
             return true
         }
         if path.contains("/var/mobile/Containers/Bundle/Application") || path.contains("/private/var/mobile/Containers/Bundle/Application") {
@@ -694,6 +699,11 @@ final class AppViewModel: ObservableObject {
         return FileManager.default.fileExists(atPath: receiptURL.path)
             || FileManager.default.fileExists(atPath: masReceiptURL.path)
             || FileManager.default.fileExists(atPath: scInfoURL.path)
+    }
+
+    private func isRootlessEnvironment() -> Bool {
+        return FileManager.default.fileExists(atPath: "/var/jb/Applications")
+            || FileManager.default.fileExists(atPath: "/private/var/jb/Applications")
     }
 
     private func isLikelyRootlessOnly(apps: [InstalledApp]) -> Bool {
@@ -777,22 +787,25 @@ final class AppViewModel: ObservableObject {
         return results
     }
 
-    private func copyAppBundleWithFallback(fromCandidates candidates: [String], to destination: URL) throws -> [String] {
+    private func copyAppBundleWithFallback(fromCandidates candidates: [String], to destination: URL) throws -> (skippedFiles: [String], detectedExecutable: String?) {
         var lastError: Error?
         var skippedFiles: [String] = []
+        var detectedExecutable: String?
         for candidatePath in candidates {
             let sourceURL = URL(fileURLWithPath: candidatePath, isDirectory: true)
             appendLog("コピー元: \(candidatePath)")
             do {
                 try FileManager.default.copyItem(at: sourceURL, to: destination)
-                return skippedFiles
+                detectedExecutable = guessExecutableName(in: sourceURL)
+                return (skippedFiles, detectedExecutable)
             } catch {
                 lastError = error
                 appendLog("コピー失敗（直コピー）: \(error.localizedDescription)")
                 do {
                     skippedFiles = try copyDirectorySkippingUnreadable(from: sourceURL, to: destination)
+                    detectedExecutable = guessExecutableName(in: sourceURL)
                     appendLog("コピー完了（スキップあり）")
-                    return skippedFiles
+                    return (skippedFiles, detectedExecutable)
                 } catch {
                     lastError = error
                     appendLog("コピー失敗（スキップ方式）: \(error.localizedDescription)")
@@ -802,7 +815,7 @@ final class AppViewModel: ObservableObject {
         if let lastError {
             throw lastError
         }
-        return skippedFiles
+        return (skippedFiles, detectedExecutable)
     }
 
     private func copyDirectorySkippingUnreadable(from source: URL, to destination: URL) throws -> [String] {
@@ -872,16 +885,17 @@ final class AppViewModel: ObservableObject {
         return false
     }
 
-    private func writeFallbackInfoPlist(for destAppURL: URL, app: InstalledApp) -> Bool {
+    private func writeFallbackInfoPlist(for destAppURL: URL, app: InstalledApp, executableName: String?) -> Bool {
         let destInfoURL = destAppURL.appendingPathComponent("Info.plist")
         if FileManager.default.fileExists(atPath: destInfoURL.path) {
             return true
         }
-        let executableName = guessExecutableName(in: destAppURL)
+        let resolvedExecutable = executableName
+            ?? guessExecutableName(in: destAppURL)
             ?? destAppURL.deletingPathExtension().lastPathComponent
         let plist: [String: Any] = [
             "CFBundleIdentifier": app.bundleId,
-            "CFBundleExecutable": executableName,
+            "CFBundleExecutable": resolvedExecutable,
             "CFBundleName": app.name,
             "CFBundleDisplayName": app.name,
             "CFBundlePackageType": "APPL",
@@ -954,7 +968,7 @@ final class AppViewModel: ObservableObject {
         return warnings
     }
 
-    private func validateIPA(at url: URL) -> [String] {
+    private func validateIPA(at url: URL, expectedExecutable: String?) -> [String] {
         var warnings: [String] = []
         let fileManager = FileManager.default
         let tempRoot = fileManager.temporaryDirectory.appendingPathComponent("IPAValidate-\(UUID().uuidString)")
@@ -996,6 +1010,12 @@ final class AppViewModel: ObservableObject {
                 }
             } else {
                 warnings.append("CFBundleExecutable がありません")
+            }
+            if let expectedExecutable, !expectedExecutable.isEmpty {
+                let expectedURL = appURL.appendingPathComponent(expectedExecutable)
+                if !fileManager.fileExists(atPath: expectedURL.path) {
+                    warnings.append("期待した実行ファイルが見つかりません: \(expectedExecutable)")
+                }
             }
         } catch {
             warnings.append("検証失敗: \(error.localizedDescription)")
