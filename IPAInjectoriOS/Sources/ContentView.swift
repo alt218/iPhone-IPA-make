@@ -5,42 +5,53 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @ObservedObject var viewModel: AppViewModel
 
-    private let dylibType = UTType(filenameExtension: "dylib") ?? .data
-
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    headerSection
-                    inputSection
-                    generationSection
-                    actionSection
-                    outputSection
-                    logSection
+        Group {
+            if #available(iOS 16.0, *) {
+                NavigationStack {
+                    mainContent
                 }
-                .padding(16)
-            }
-            .navigationTitle("IPA一括生成")
-            .sheet(isPresented: $viewModel.isImportingDylibs) {
-                DylibFilePicker { result in
-                    viewModel.isImportingDylibs = false
-                    viewModel.handleDylibSelection(result)
+            } else {
+                NavigationView {
+                    mainContent
                 }
-                .ignoresSafeArea()
+                .navigationViewStyle(.stack)
             }
-            .sheet(isPresented: $viewModel.isImportingIPA) {
-                IPAFilePicker { result in
-                    viewModel.isImportingIPA = false
-                    viewModel.handleIPAImport(result)
-                }
-                .ignoresSafeArea()
+        }
+    }
+
+    private var mainContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                headerSection
+                inputSection
+                generationSection
+                actionSection
+                outputSection
+                logSection
             }
-            .sheet(isPresented: $viewModel.isSelectingIPAList) {
-                ipaListSheet
+            .padding(16)
+        }
+        .navigationTitle("IPA一括生成")
+        .sheet(isPresented: $viewModel.isImportingDylibs) {
+            DylibFilePicker { result in
+                viewModel.isImportingDylibs = false
+                viewModel.handleDylibSelection(result)
             }
-            .sheet(isPresented: $viewModel.isSelectingInstalledApps) {
-                installedAppsSheet
+            .ignoresSafeArea()
+        }
+        .sheet(isPresented: $viewModel.isImportingIPA) {
+            IPAFilePicker { result in
+                viewModel.isImportingIPA = false
+                viewModel.handleIPAImport(result)
             }
+            .ignoresSafeArea()
+        }
+        .sheet(isPresented: $viewModel.isSelectingIPAList) {
+            ipaListSheet
+        }
+        .sheet(isPresented: $viewModel.isSelectingInstalledApps) {
+            installedAppsSheet
         }
     }
 
@@ -203,8 +214,16 @@ struct ContentView: View {
                             Text(url.lastPathComponent)
                                 .lineLimit(1)
                             Spacer()
-                            ShareLink(item: url) {
-                                Label("共有", systemImage: "square.and.arrow.up")
+                            if #available(iOS 16.0, *) {
+                                ShareLink(item: url) {
+                                    Label("共有", systemImage: "square.and.arrow.up")
+                                }
+                            } else {
+                                Button {
+                                    ActivityPresenter.shared.share(url: url)
+                                } label: {
+                                    Label("共有", systemImage: "square.and.arrow.up")
+                                }
                             }
                         }
                     }
@@ -279,17 +298,17 @@ struct ContentView: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button("閉じる") {
                         viewModel.isSelectingIPAList = false
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("追加") {
                         viewModel.startIPAImportFromSheet()
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("更新") {
                         viewModel.refreshAvailableIPAs()
                     }
@@ -342,22 +361,22 @@ struct ContentView: View {
             }
             .navigationTitle("インストール済みアプリ")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button("閉じる") {
                         viewModel.isSelectingInstalledApps = false
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("更新") {
                         viewModel.refreshInstalledApps()
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("ファイルから追加") {
                         viewModel.startIPAImportFromSheet()
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("診断") {
                         viewModel.appendInstalledAppsDiagnostics()
                     }
@@ -446,5 +465,16 @@ private struct DylibFilePicker: UIViewControllerRepresentable {
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
             onPick(.success([]))
         }
+    }
+}
+
+private final class ActivityPresenter {
+    static let shared = ActivityPresenter()
+    private init() {}
+
+    func share(url: URL) {
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        controller.popoverPresentationController?.sourceView = UIApplication.shared.windows.first
+        UIApplication.shared.windows.first?.rootViewController?.present(controller, animated: true)
     }
 }

@@ -32,6 +32,43 @@ final class AppViewModel: ObservableObject {
     @Published var availableIPAs: [URL] = []
     @Published var installedApps: [InstalledApp] = []
     @Published var installedAppsQuery: String = ""
+    @Published var enableHistory = true {
+        didSet { settings.saveFeatureFlag(enableHistory, forKey: "enableHistory") }
+    }
+    @Published var enableFilters = true {
+        didSet { settings.saveFeatureFlag(enableFilters, forKey: "enableFilters") }
+    }
+    @Published var enableBatchExport = true {
+        didSet { settings.saveFeatureFlag(enableBatchExport, forKey: "enableBatchExport") }
+    }
+    @Published var enableSkipAnalysis = true {
+        didSet { settings.saveFeatureFlag(enableSkipAnalysis, forKey: "enableSkipAnalysis") }
+    }
+    @Published var enableValidation = true {
+        didSet { settings.saveFeatureFlag(enableValidation, forKey: "enableValidation") }
+    }
+    @Published var enableOutputFolder = true {
+        didSet { settings.saveFeatureFlag(enableOutputFolder, forKey: "enableOutputFolder") }
+    }
+    @Published var enableDylibPresets = true {
+        didSet { settings.saveFeatureFlag(enableDylibPresets, forKey: "enableDylibPresets") }
+    }
+    @Published var enableNameIconOverride = true {
+        didSet { settings.saveFeatureFlag(enableNameIconOverride, forKey: "enableNameIconOverride") }
+    }
+    @Published var outputFolderName: String = "GeneratedIPAs" {
+        didSet {
+            settings.saveOutputFolderName(outputFolderName)
+            outputDirectoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent(outputFolderName, isDirectory: true)
+        }
+    }
+    @Published var overrideDisplayName: String = "" {
+        didSet { settings.saveOverrideDisplayName(overrideDisplayName) }
+    }
+    @Published var overrideIconURL: URL? {
+        didSet { settings.saveOverrideIconPath(overrideIconURL?.path) }
+    }
     @Published var mode: GenerationMode = .count {
         didSet { settings.save(mode: mode) }
     }
@@ -50,11 +87,12 @@ final class AppViewModel: ObservableObject {
     @Published var exportStatus = ""
     @Published var isConfirmingDelete = false
     @Published var pendingDeleteIPA: URL?
+    @Published var historyItems: [HistoryItem] = []
     @Published var errorMessage: String?
     @Published var logText = ""
     @Published var generatedFiles: [URL] = []
 
-    let outputDirectoryURL: URL
+    var outputDirectoryURL: URL
 
     private let settings = SettingsStore()
 
@@ -63,8 +101,21 @@ final class AppViewModel: ObservableObject {
         mode = snapshot.mode
         countValue = snapshot.count
         suffixInput = snapshot.suffixInput
+        enableHistory = snapshot.enableHistory
+        enableFilters = snapshot.enableFilters
+        enableBatchExport = snapshot.enableBatchExport
+        enableSkipAnalysis = snapshot.enableSkipAnalysis
+        enableValidation = snapshot.enableValidation
+        enableOutputFolder = snapshot.enableOutputFolder
+        enableDylibPresets = snapshot.enableDylibPresets
+        enableNameIconOverride = snapshot.enableNameIconOverride
+        outputFolderName = snapshot.outputFolderName
+        overrideDisplayName = snapshot.overrideDisplayName
+        if let path = snapshot.overrideIconPath {
+            overrideIconURL = URL(fileURLWithPath: path)
+        }
         outputDirectoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("GeneratedIPAs", isDirectory: true)
+            .appendingPathComponent(outputFolderName, isDirectory: true)
     }
 
     var ipaLabel: String {
