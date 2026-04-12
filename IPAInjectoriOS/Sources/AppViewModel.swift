@@ -361,7 +361,13 @@ final class AppViewModel: ObservableObject {
             let fallbackExecutable = URL(fileURLWithPath: candidatePaths.first ?? app.appURL.path)
                 .deletingPathExtension()
                 .lastPathComponent
-            let expectedExecutable = resolveExecutableName(fromCandidates: candidatePaths) ?? fallbackExecutable
+            let workspaceExecutable = resolveExecutableNameFromWorkspace(bundleId: app.bundleId)
+            if let workspaceExecutable {
+                appendLog("実行ファイル(LS): \(workspaceExecutable)")
+            }
+            let expectedExecutable = workspaceExecutable
+                ?? resolveExecutableName(fromCandidates: candidatePaths)
+                ?? fallbackExecutable
             if let hidePath = candidatePaths.first(where: { $0.contains("/var/containers/Bundle/Application") || $0.contains("/private/var/containers/Bundle/Application") }) {
                 appendLog("hide環境の可能性: \(hidePath)")
             }
@@ -859,8 +865,12 @@ final class AppViewModel: ObservableObject {
     private func appURLCandidates(from path: String) -> [String] {
         var results: [String] = [path]
         let mappings: [(String, String)] = [
+            ("/private/var/containers/Bundle/Application", "/var/containers/Bundle/Application"),
+            ("/var/containers/Bundle/Application", "/private/var/containers/Bundle/Application"),
             ("/private/var/containers/Bundle/Application", "/private/var/jb/var/containers/Bundle/Application"),
             ("/var/containers/Bundle/Application", "/var/jb/var/containers/Bundle/Application"),
+            ("/private/var/mobile/Containers/Bundle/Application", "/var/mobile/Containers/Bundle/Application"),
+            ("/var/mobile/Containers/Bundle/Application", "/private/var/mobile/Containers/Bundle/Application"),
             ("/private/var/mobile/Containers/Bundle/Application", "/private/var/jb/var/mobile/Containers/Bundle/Application"),
             ("/var/mobile/Containers/Bundle/Application", "/var/jb/var/mobile/Containers/Bundle/Application"),
             ("/Applications", "/var/jb/Applications"),
@@ -938,6 +948,10 @@ final class AppViewModel: ObservableObject {
                 try FileManager.default.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
                 try FileManager.default.copyItem(at: itemURL, to: targetURL)
             } catch {
+                if copyFileDataOnly(from: itemURL, to: targetURL) {
+                    appendLog("コピー(データのみ): \(relative)")
+                    continue
+                }
                 if let expectedExecutable,
                    itemURL.lastPathComponent.lowercased() == expectedExecutable.lowercased(),
                    let data = try? Data(contentsOf: itemURL) {
@@ -1009,6 +1023,9 @@ final class AppViewModel: ObservableObject {
             if !FileManager.default.fileExists(atPath: sourceExecURL.path) {
                 continue
             }
+            if !FileManager.default.isReadableFile(atPath: sourceExecURL.path) {
+                appendLog("実行ファイル読み取り不可: \(sourceExecURL.path)")
+            }
             do {
                 try FileManager.default.createDirectory(
                     at: destExecURL.deletingLastPathComponent(),
@@ -1019,6 +1036,10 @@ final class AppViewModel: ObservableObject {
                 appendLog("実行ファイルをコピー: \(expectedExecutable)")
                 return true
             } catch {
+                if copyFileDataOnly(from: sourceExecURL, to: destExecURL) {
+                    appendLog("実行ファイルをコピー(データのみ): \(expectedExecutable)")
+                    return true
+                }
                 if let data = try? Data(contentsOf: sourceExecURL) {
                     do {
                         try data.write(to: destExecURL)
@@ -1096,6 +1117,43 @@ final class AppViewModel: ObservableObject {
             }
         }
         return nil
+    }
+
+    private func resolveExecutableNameFromWorkspace(bundleId: String) -> String? {
+        guard let workspaceClass = NSClassFromString("LSApplicationWorkspace") as? NSObject.Type else {
+            return nil
+        }
+        let selector = NSSelectorFromString("defaultWorkspace")
+        guard workspaceClass.responds(to: selector) else { return nil }
+        guard let workspace = workspaceClass.perform(selector)?.takeUnretainedValue() as? NSObject else {
+            return nil
+        }
+        let proxySelector = NSSelectorFromString("applicationProxyForIdentifier:")
+        guard workspace.responds(to: proxySelector) else { return nil }
+        guard let proxy = workspace.perform(proxySelector, with: bundleId)?.takeUnretainedValue() as? NSObject else {
+            return nil
+        }
+        let execSelector = NSSelectorFromString("bundleExecutable")
+        if proxy.responds(to: execSelector),
+           let exec = proxy.perform(execSelector)?.takeUnretainedValue() as? String,
+           !exec.isEmpty {
+            return exec
+        }
+        return nil
+    }
+
+    private func copyFileDataOnly(from source: URL, to destination: URL) -> Bool {
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        } catch {
+            return false
+        }
+        let result = copyfile(source.path, destination.path, nil, copyfile_flags_t(COPYFILE_DATA))
+        return result == 0
     }
 
     private func writeSkippedFilesLog(for appName: String, skipped: [String], in directory: URL) throws -> URL {
