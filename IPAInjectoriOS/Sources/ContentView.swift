@@ -304,6 +304,14 @@ struct ContentView: View {
     private var installedAppsSheet: some View {
         NavigationStack {
             List {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("検索（アプリ名 / Bundle ID）", text: $viewModel.installedAppsQuery)
+                        .textFieldStyle(.roundedBorder)
+                }
+                .padding(.vertical, 4)
+
                 if viewModel.installedApps.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("アプリ一覧を取得できません")
@@ -316,7 +324,7 @@ struct ContentView: View {
                         }
                     }
                 } else {
-                    ForEach(viewModel.installedApps) { app in
+                    ForEach(viewModel.filteredInstalledApps()) { app in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(app.name)
                                 .lineLimit(1)
@@ -416,7 +424,7 @@ private struct DylibFilePicker: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let dylibType = UTType(filenameExtension: "dylib") ?? .data
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [dylibType], asCopy: false)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [dylibType], asCopy: true)
         picker.allowsMultipleSelection = true
         picker.delegate = context.coordinator
         return picker

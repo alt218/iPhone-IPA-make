@@ -31,6 +31,7 @@ final class AppViewModel: ObservableObject {
     @Published var dylibURLs: [URL] = []
     @Published var availableIPAs: [URL] = []
     @Published var installedApps: [InstalledApp] = []
+    @Published var installedAppsQuery: String = ""
     @Published var mode: GenerationMode = .count {
         didSet { settings.save(mode: mode) }
     }
@@ -117,6 +118,7 @@ final class AppViewModel: ObservableObject {
 
     func refreshInstalledApps() {
         installedApps = []
+        installedAppsQuery = ""
 
         let workspaceApps = fetchAppsViaLSApplicationWorkspace()
         if !workspaceApps.isEmpty {
@@ -271,12 +273,14 @@ final class AppViewModel: ObservableObject {
             let urls = try result.get()
             if urls.isEmpty {
                 dylibURLs = []
+                appendLog("dylib選択: 0件")
                 return
             }
             let destDir = dylibStorageDirectory()
             try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
             var copied: [URL] = []
-            for url in urls where url.pathExtension.lowercased() == "dylib" {
+            for url in urls {
+                guard url.pathExtension.lowercased() == "dylib" else { continue }
                 let accessed = url.startAccessingSecurityScopedResource()
                 defer {
                     if accessed {
@@ -288,8 +292,21 @@ final class AppViewModel: ObservableObject {
                 copied.append(destURL)
             }
             dylibURLs = copied.sorted { $0.lastPathComponent < $1.lastPathComponent }
+            appendLog("dylib追加: \(dylibURLs.count) 件")
         } catch {
             errorMessage = error.localizedDescription
+            appendLog("dylib追加失敗: \(error.localizedDescription)")
+        }
+    }
+
+    func filteredInstalledApps() -> [InstalledApp] {
+        let query = installedAppsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.isEmpty {
+            return installedApps
+        }
+        return installedApps.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+            || $0.bundleId.localizedCaseInsensitiveContains(query)
         }
     }
 
