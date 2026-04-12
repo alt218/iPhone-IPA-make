@@ -17,6 +17,7 @@ targets:
     platform: iOS
     sources:
       - IPAInjectoriOS/Sources
+      - IPAInjectoriOS/Resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.ipainjectorios
@@ -24,6 +25,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
         GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_CFBundleDisplayName: IPAInjectoriOS
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES

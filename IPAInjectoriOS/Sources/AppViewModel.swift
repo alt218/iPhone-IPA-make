@@ -10,9 +10,9 @@ enum GenerationMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .count:
-            return "Count"
+            return "件数"
         case .suffixes:
-            return "Suffixes"
+            return "サフィックス"
         }
     }
 }
@@ -21,6 +21,7 @@ enum GenerationMode: String, CaseIterable, Identifiable {
 final class AppViewModel: ObservableObject {
     @Published var ipaURL: URL?
     @Published var dylibURLs: [URL] = []
+    @Published var availableIPAs: [URL] = []
     @Published var mode: GenerationMode = .count {
         didSet { settings.save(mode: mode) }
     }
@@ -30,7 +31,7 @@ final class AppViewModel: ObservableObject {
     @Published var suffixInput: String = "a1, a2, a3" {
         didSet { settings.save(suffixInput: suffixInput) }
     }
-    @Published var isImportingIPA = false
+    @Published var isSelectingIPAList = false
     @Published var isImportingDylibs = false
     @Published var isProcessing = false
     @Published var errorMessage: String?
@@ -51,15 +52,18 @@ final class AppViewModel: ObservableObject {
     }
 
     var ipaLabel: String {
-        ipaURL?.lastPathComponent ?? "No IPA selected"
+        ipaURL?.lastPathComponent ?? "IPAが選択されていません"
     }
 
-    func handleIPASelection(_ result: Result<[URL], Error>) {
-        do {
-            ipaURL = try result.get().first
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+    func refreshAvailableIPAs() {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let ipaFiles = collectIPAFiles(in: documents)
+        availableIPAs = ipaFiles.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    func selectIPA(_ url: URL) {
+        ipaURL = url
+        isSelectingIPAList = false
     }
 
     func handleDylibSelection(_ result: Result<[URL], Error>) {
@@ -77,12 +81,12 @@ final class AppViewModel: ObservableObject {
         logText = ""
 
         guard let ipaURL else {
-            errorMessage = "Select an IPA file."
+            errorMessage = "IPAを選択してください。"
             return
         }
 
         guard !dylibURLs.isEmpty else {
-            errorMessage = "Select at least one dylib file."
+            errorMessage = "dylibを1つ以上選択してください。"
             return
         }
 
@@ -90,7 +94,7 @@ final class AppViewModel: ObservableObject {
         switch mode {
         case .count:
             guard countValue > 0 else {
-                errorMessage = "Count must be greater than 0."
+                errorMessage = "件数は1以上にしてください。"
                 return
             }
             suffixes = (1...countValue).map { "a\($0)" }
@@ -101,7 +105,7 @@ final class AppViewModel: ObservableObject {
                 .filter { !$0.isEmpty }
 
             guard !suffixes.isEmpty else {
-                errorMessage = "Enter at least one suffix."
+                errorMessage = "suffixを1つ以上入力してください。"
                 return
             }
         }
@@ -130,17 +134,35 @@ final class AppViewModel: ObservableObject {
 
                 await MainActor.run {
                     self.generatedFiles = result.outputURLs
-                    self.appendLog("Completed: generated \(result.outputURLs.count) IPA files")
+                    self.appendLog("完了: \(result.outputURLs.count) 個のIPAを生成しました")
                     self.isProcessing = false
                 }
             } catch {
                 await MainActor.run {
                     self.errorMessage = error.localizedDescription
-                    self.appendLog("Error: \(error.localizedDescription)")
+                    self.appendLog("エラー: \(error.localizedDescription)")
                     self.isProcessing = false
                 }
             }
         }
+    }
+
+    private func collectIPAFiles(in root: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var results: [URL] = []
+        for case let url as URL in enumerator {
+            if url.pathExtension.lowercased() == "ipa" {
+                results.append(url)
+            }
+        }
+        return results
     }
 
     private func appendLog(_ line: String) {

@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @ObservedObject var viewModel: AppViewModel
 
-    private let ipaType = UTType(filenameExtension: "ipa") ?? .data
     private let dylibType = UTType(filenameExtension: "dylib") ?? .data
 
     var body: some View {
@@ -20,14 +19,7 @@ struct ContentView: View {
                 }
                 .padding(16)
             }
-            .navigationTitle("IPA Multi Generator")
-            .fileImporter(
-                isPresented: $viewModel.isImportingIPA,
-                allowedContentTypes: [ipaType],
-                allowsMultipleSelection: false
-            ) { result in
-                viewModel.handleIPASelection(result)
-            }
+            .navigationTitle("IPA一括生成")
             .fileImporter(
                 isPresented: $viewModel.isImportingDylibs,
                 allowedContentTypes: [dylibType],
@@ -35,38 +27,42 @@ struct ContentView: View {
             ) { result in
                 viewModel.handleDylibSelection(result)
             }
+            .sheet(isPresented: $viewModel.isSelectingIPAList) {
+                ipaListSheet
+            }
         }
     }
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Generate multiple modified IPA files from one base IPA")
+            Text("1つのIPAから複数の改変版IPAを生成")
                 .font(.title2.bold())
-            Text("Change the bundle identifier and inject multiple dylibs into each variant.")
+            Text("Bundle ID を変更し、複数のdylibを注入します。")
                 .foregroundStyle(.secondary)
         }
     }
 
     private var inputSection: some View {
-        GroupBox("Input") {
+        GroupBox("入力") {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("IPA")
                         .font(.headline)
                     Text(viewModel.ipaLabel)
                         .foregroundStyle(viewModel.ipaURL == nil ? .secondary : .primary)
-                    Button("Select IPA") {
-                        viewModel.isImportingIPA = true
+                    Button("IPAを選択") {
+                        viewModel.refreshAvailableIPAs()
+                        viewModel.isSelectingIPAList = true
                     }
                 }
 
                 Divider()
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("dylibs")
+                    Text("dylib")
                         .font(.headline)
                     if viewModel.dylibURLs.isEmpty {
-                        Text("No dylib selected")
+                        Text("dylibが選択されていません")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(viewModel.dylibURLs, id: \.path) { url in
@@ -75,7 +71,7 @@ struct ContentView: View {
                         }
                     }
 
-                    Button("Select dylibs") {
+                    Button("dylibを選択") {
                         viewModel.isImportingDylibs = true
                     }
                 }
@@ -85,9 +81,9 @@ struct ContentView: View {
     }
 
     private var generationSection: some View {
-        GroupBox("Generation") {
+        GroupBox("生成") {
             VStack(alignment: .leading, spacing: 12) {
-                Picker("Mode", selection: $viewModel.mode) {
+                Picker("モード", selection: $viewModel.mode) {
                     ForEach(GenerationMode.allCases) { mode in
                         Text(mode.title).tag(mode)
                     }
@@ -96,18 +92,18 @@ struct ContentView: View {
 
                 if viewModel.mode == .count {
                     HStack {
-                        Text("Count")
-                            .frame(width: 60, alignment: .leading)
+                        Text("件数")
+                            .frame(width: 70, alignment: .leading)
                         TextField("10", value: $viewModel.countValue, format: .number)
                             .keyboardType(.numberPad)
                             .textFieldStyle(.roundedBorder)
-                        Text("Auto generates a1, a2, a3...")
+                        Text("a1, a2, a3... を自動生成")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("suffix")
+                        Text("サフィックス")
                         TextEditor(text: $viewModel.suffixInput)
                             .frame(minHeight: 120)
                             .padding(4)
@@ -115,7 +111,7 @@ struct ContentView: View {
                                 RoundedRectangle(cornerRadius: 10)
                                     .stroke(Color.secondary.opacity(0.3))
                             )
-                        Text("Comma, whitespace, or newline separated. Example: a1, a2, a3")
+                        Text("カンマ/空白/改行区切り。例: a1, a2, a3")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -126,7 +122,7 @@ struct ContentView: View {
     }
 
     private var actionSection: some View {
-        GroupBox("Run") {
+        GroupBox("実行") {
             VStack(alignment: .leading, spacing: 12) {
                 Button {
                     viewModel.run()
@@ -137,7 +133,7 @@ struct ContentView: View {
                             ProgressView()
                                 .tint(.white)
                         }
-                        Text(viewModel.isProcessing ? "Processing..." : "Build IPA Variants")
+                        Text(viewModel.isProcessing ? "処理中..." : "IPAを生成")
                             .bold()
                         Spacer()
                     }
@@ -145,7 +141,7 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(viewModel.isProcessing)
 
-                Text("Output: \(viewModel.outputDirectoryURL.path)")
+                Text("出力先: \(viewModel.outputDirectoryURL.path)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -159,10 +155,10 @@ struct ContentView: View {
     }
 
     private var outputSection: some View {
-        GroupBox("Output") {
+        GroupBox("出力") {
             VStack(alignment: .leading, spacing: 10) {
                 if viewModel.generatedFiles.isEmpty {
-                    Text("No output yet")
+                    Text("まだ出力はありません")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(viewModel.generatedFiles, id: \.path) { url in
@@ -171,7 +167,7 @@ struct ContentView: View {
                                 .lineLimit(1)
                             Spacer()
                             ShareLink(item: url) {
-                                Label("Share", systemImage: "square.and.arrow.up")
+                                Label("共有", systemImage: "square.and.arrow.up")
                             }
                         }
                     }
@@ -182,15 +178,57 @@ struct ContentView: View {
     }
 
     private var logSection: some View {
-        GroupBox("Log") {
+        GroupBox("ログ") {
             ScrollView {
-                Text(viewModel.logText.isEmpty ? "Logs will appear here" : viewModel.logText)
+                Text(viewModel.logText.isEmpty ? "ログはここに表示されます" : viewModel.logText)
                     .font(.body.monospaced())
                     .foregroundStyle(viewModel.logText.isEmpty ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             }
             .frame(minHeight: 220)
+        }
+    }
+
+    private var ipaListSheet: some View {
+        NavigationStack {
+            List {
+                if viewModel.availableIPAs.isEmpty {
+                    Text("IPAが見つかりません")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.availableIPAs, id: \.path) { url in
+                        Button {
+                            viewModel.selectIPA(url)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(url.lastPathComponent)
+                                    .lineLimit(1)
+                                Text(url.deletingLastPathComponent().path)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("IPA一覧")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("閉じる") {
+                        viewModel.isSelectingIPAList = false
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("更新") {
+                        viewModel.refreshAvailableIPAs()
+                    }
+                }
+            }
+            .onAppear {
+                viewModel.refreshAvailableIPAs()
+            }
         }
     }
 }
