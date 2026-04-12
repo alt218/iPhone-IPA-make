@@ -72,7 +72,7 @@ struct ContentView: View {
                         }
                     }
                     Button("ファイルから追加") {
-                        viewModel.isImportingIPA = true
+                        viewModel.startIPAImportFromSheet()
                     }
                 }
 
@@ -235,7 +235,7 @@ struct ContentView: View {
                         Text("IPAが見つかりません")
                             .foregroundStyle(.secondary)
                         Button("ファイルから追加") {
-                            viewModel.isImportingIPA = true
+                            viewModel.startIPAImportFromSheet()
                         }
                     }
                 } else {
@@ -286,7 +286,7 @@ struct ContentView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("追加") {
-                        viewModel.isImportingIPA = true
+                        viewModel.startIPAImportFromSheet()
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -342,6 +342,11 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("更新") {
                         viewModel.refreshInstalledApps()
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("ファイルから追加") {
+                        viewModel.startIPAImportFromSheet()
                     }
                 }
             }

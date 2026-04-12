@@ -94,11 +94,26 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func startIPAImportFromSheet() {
+        isSelectingIPAList = false
+        isSelectingInstalledApps = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            self.isImportingIPA = true
+        }
+    }
+
     func refreshInstalledApps() {
         installedApps = []
         let roots = [
             URL(fileURLWithPath: "/Applications", isDirectory: true),
-            URL(fileURLWithPath: "/var/containers/Bundle/Application", isDirectory: true)
+            URL(fileURLWithPath: "/var/containers/Bundle/Application", isDirectory: true),
+            URL(fileURLWithPath: "/private/var/containers/Bundle/Application", isDirectory: true),
+            URL(fileURLWithPath: "/var/jb/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/var/jb/containers/Bundle/Application", isDirectory: true),
+            URL(fileURLWithPath: "/var/jb/Containers/Bundle/Application", isDirectory: true),
+            URL(fileURLWithPath: "/private/var/jb/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/private/var/jb/containers/Bundle/Application", isDirectory: true),
+            URL(fileURLWithPath: "/private/var/jb/Containers/Bundle/Application", isDirectory: true)
         ]
 
         var apps: [InstalledApp] = []
