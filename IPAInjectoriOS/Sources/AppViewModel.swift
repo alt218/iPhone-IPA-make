@@ -379,7 +379,7 @@ final class AppViewModel: ObservableObject {
                     appendLog("警告: Info.plist を取得できませんでした")
                 }
             }
-            if let detectedExecutable, !ensureExecutable(for: destAppURL, fromCandidates: candidatePaths, expectedExecutable: detectedExecutable) {
+            if !ensureExecutable(for: destAppURL, fromCandidates: candidatePaths, expectedExecutable: detectedExecutable) {
                 appendLog("警告: 実行ファイルをコピーできませんでした: \(detectedExecutable)")
             }
             var skippedLogURL: URL?
