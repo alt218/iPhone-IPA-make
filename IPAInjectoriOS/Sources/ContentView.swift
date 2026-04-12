@@ -72,7 +72,7 @@ struct ContentView: View {
                         }
                     }
                     Button("ファイルから追加") {
-                        viewModel.startIPAImportFromSheet()
+                        viewModel.startIPAImport()
                     }
                 }
 
