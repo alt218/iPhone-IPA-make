@@ -29,6 +29,13 @@ struct ContentView: View {
                 viewModel.handleIPAImport(result)
             }
             .fileImporter(
+                isPresented: $viewModel.isImportingIPAFromSheet,
+                allowedContentTypes: [ipaType],
+                allowsMultipleSelection: false
+            ) { result in
+                viewModel.handleIPAImport(result)
+            }
+            .fileImporter(
                 isPresented: $viewModel.isImportingDylibs,
                 allowedContentTypes: [dylibType],
                 allowsMultipleSelection: true

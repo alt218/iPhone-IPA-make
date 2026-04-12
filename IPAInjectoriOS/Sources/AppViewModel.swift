@@ -41,6 +41,7 @@ final class AppViewModel: ObservableObject {
         didSet { settings.save(suffixInput: suffixInput) }
     }
     @Published var isImportingIPA = false
+    @Published var isImportingIPAFromSheet = false
     @Published var isSelectingIPAList = false
     @Published var isSelectingInstalledApps = false
     @Published var isImportingDylibs = false
@@ -95,11 +96,7 @@ final class AppViewModel: ObservableObject {
     }
 
     func startIPAImportFromSheet() {
-        isSelectingIPAList = false
-        isSelectingInstalledApps = false
-        DispatchQueue.main.async {
-            self.isImportingIPA = true
-        }
+        isImportingIPAFromSheet = true
     }
 
     func startIPAImport() {
@@ -129,6 +126,7 @@ final class AppViewModel: ObservableObject {
         var apps: [InstalledApp] = []
         for root in roots {
             apps.append(contentsOf: scanApps(in: root))
+            apps.append(contentsOf: scanAppsOneLevel(in: root))
         }
 
         let storeApps = apps.filter { isAppStoreApp($0.appURL) }
@@ -137,6 +135,7 @@ final class AppViewModel: ObservableObject {
             .sorted { $0.name < $1.name }
 
         installedApps = unique
+        appendLog("アプリ一覧: \(installedApps.count) 件")
     }
 
     func exportInstalledAppToIPA(_ app: InstalledApp) {
@@ -334,10 +333,45 @@ final class AppViewModel: ObservableObject {
         return results
     }
 
+    private func scanAppsOneLevel(in root: URL) -> [InstalledApp] {
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        guard let top = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var results: [InstalledApp] = []
+        for url in top {
+            if url.pathExtension == "app" {
+                if let app = makeInstalledApp(from: url) {
+                    results.append(app)
+                }
+                continue
+            }
+            if let children = try? FileManager.default.contentsOfDirectory(
+                at: url,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                for child in children where child.pathExtension == "app" {
+                    if let app = makeInstalledApp(from: child) {
+                        results.append(app)
+                    }
+                }
+            }
+        }
+        return results
+    }
+
     private func isAppStoreApp(_ appURL: URL) -> Bool {
         let receiptURL = appURL.appendingPathComponent("StoreKit/receipt")
+        let masReceiptURL = appURL.appendingPathComponent("_MASReceipt/receipt")
         let scInfoURL = appURL.appendingPathComponent("SC_Info")
         return FileManager.default.fileExists(atPath: receiptURL.path)
+            || FileManager.default.fileExists(atPath: masReceiptURL.path)
             || FileManager.default.fileExists(atPath: scInfoURL.path)
     }
 
