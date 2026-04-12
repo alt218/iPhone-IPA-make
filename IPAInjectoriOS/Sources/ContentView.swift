@@ -240,22 +240,44 @@ struct ContentView: View {
                     }
                 } else {
                     ForEach(viewModel.availableIPAs, id: \.path) { url in
-                        Button {
-                            viewModel.selectIPA(url)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(url.lastPathComponent)
-                                    .lineLimit(1)
-                                Text(url.deletingLastPathComponent().path)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                        HStack {
+                            Button {
+                                viewModel.selectIPA(url)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(url.lastPathComponent)
+                                        .lineLimit(1)
+                                    Text(url.deletingLastPathComponent().path)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            Spacer()
+                            Button("削除") {
+                                viewModel.requestDeleteIPA(url)
                             }
                         }
                     }
                 }
             }
             .navigationTitle("IPA一覧")
+            .confirmationDialog(
+                "削除しますか？",
+                isPresented: $viewModel.isConfirmingDelete,
+                titleVisibility: .visible
+            ) {
+                Button("削除", role: .destructive) {
+                    viewModel.confirmDeleteIPA()
+                }
+                Button("キャンセル", role: .cancel) {
+                    viewModel.cancelDeleteIPA()
+                }
+            } message: {
+                if let url = viewModel.pendingDeleteIPA {
+                    Text(url.lastPathComponent)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("閉じる") {
@@ -325,6 +347,18 @@ struct ContentView: View {
             }
             .onAppear {
                 viewModel.refreshInstalledApps()
+            }
+            .overlay {
+                if viewModel.isExportingIPA {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text(viewModel.exportStatus.isEmpty ? "吸い出し中..." : viewModel.exportStatus)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(16)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
             }
         }
     }

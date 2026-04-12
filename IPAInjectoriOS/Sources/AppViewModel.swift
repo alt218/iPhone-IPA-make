@@ -45,6 +45,10 @@ final class AppViewModel: ObservableObject {
     @Published var isSelectingInstalledApps = false
     @Published var isImportingDylibs = false
     @Published var isProcessing = false
+    @Published var isExportingIPA = false
+    @Published var exportStatus = ""
+    @Published var isConfirmingDelete = false
+    @Published var pendingDeleteIPA: URL?
     @Published var errorMessage: String?
     @Published var logText = ""
     @Published var generatedFiles: [URL] = []
@@ -102,7 +106,8 @@ final class AppViewModel: ObservableObject {
             apps.append(contentsOf: scanApps(in: root))
         }
 
-        let unique = Dictionary(grouping: apps, by: { $0.bundleId })
+        let storeApps = apps.filter { isAppStoreApp($0.appURL) }
+        let unique = Dictionary(grouping: storeApps, by: { $0.bundleId })
             .compactMap { $0.value.first }
             .sorted { $0.name < $1.name }
 
@@ -111,6 +116,9 @@ final class AppViewModel: ObservableObject {
 
     func exportInstalledAppToIPA(_ app: InstalledApp) {
         do {
+            isExportingIPA = true
+            exportStatus = "吸い出し開始: \(app.name)"
+            appendLog(exportStatus)
             let destDir = ipaStorageDirectory()
             try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
             let fileName = "\(app.name).ipa"
@@ -123,8 +131,12 @@ final class AppViewModel: ObservableObject {
             let payloadURL = tempRoot.appendingPathComponent("Payload", isDirectory: true)
             try FileManager.default.createDirectory(at: payloadURL, withIntermediateDirectories: true, attributes: nil)
             let destAppURL = payloadURL.appendingPathComponent(app.appURL.lastPathComponent)
+            exportStatus = "アプリをコピー中..."
+            appendLog(exportStatus)
             try FileManager.default.copyItem(at: app.appURL, to: destAppURL)
 
+            exportStatus = "IPAを作成中..."
+            appendLog(exportStatus)
             try FileManager.default.zipItem(
                 at: payloadURL,
                 to: destURL,
@@ -134,8 +146,45 @@ final class AppViewModel: ObservableObject {
 
             refreshAvailableIPAs()
             selectIPA(destURL)
+            exportStatus = "吸い出し完了: \(destURL.lastPathComponent)"
+            appendLog(exportStatus)
+            isExportingIPA = false
         } catch {
             errorMessage = error.localizedDescription
+            exportStatus = "吸い出し失敗: \(error.localizedDescription)"
+            appendLog(exportStatus)
+            isExportingIPA = false
+        }
+    }
+
+    func requestDeleteIPA(_ url: URL) {
+        pendingDeleteIPA = url
+        isConfirmingDelete = true
+    }
+
+    func confirmDeleteIPA() {
+        guard let url = pendingDeleteIPA else { return }
+        pendingDeleteIPA = nil
+        isConfirmingDelete = false
+        deleteIPA(url)
+    }
+
+    func cancelDeleteIPA() {
+        pendingDeleteIPA = nil
+        isConfirmingDelete = false
+    }
+
+    func deleteIPA(_ url: URL) {
+        do {
+            try FileManager.default.removeItem(at: url)
+            if ipaURL == url {
+                ipaURL = nil
+            }
+            refreshAvailableIPAs()
+            appendLog("削除: \(url.lastPathComponent)")
+        } catch {
+            errorMessage = error.localizedDescription
+            appendLog("削除失敗: \(error.localizedDescription)")
         }
     }
 
@@ -258,6 +307,13 @@ final class AppViewModel: ObservableObject {
             }
         }
         return results
+    }
+
+    private func isAppStoreApp(_ appURL: URL) -> Bool {
+        let receiptURL = appURL.appendingPathComponent("StoreKit/receipt")
+        let scInfoURL = appURL.appendingPathComponent("SC_Info")
+        return FileManager.default.fileExists(atPath: receiptURL.path)
+            || FileManager.default.fileExists(atPath: scInfoURL.path)
     }
 
     private func makeInstalledApp(from appURL: URL) -> InstalledApp? {
