@@ -25,6 +25,10 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Prepare App Icon
+        run: |
+          sips -z 1024 1024 main.jpg --out IPAInjectoriOS/Resources/Assets.xcassets/AppIcon.appiconset/main.png
+
       - name: Generate Project
         run: xcodegen generate
 
