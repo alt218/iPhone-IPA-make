@@ -13,11 +13,11 @@ enum IPAProcessorError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .appBundleNotFound:
-            return "Could not find Payload/App.app inside the IPA."
+            return "IPA内に Payload/App.app が見つかりません。"
         case .executableNotFound:
-            return "Could not find the main app executable."
+            return "メイン実行ファイルが見つかりません。"
         case .bundleIdentifierMissing:
-            return "CFBundleIdentifier is missing from Info.plist."
+            return "Info.plist に CFBundleIdentifier がありません。"
         }
     }
 }
@@ -46,7 +46,7 @@ final class IPAProcessor {
         let baseExtractURL = tempRoot.appendingPathComponent("base", isDirectory: true)
         try fileManager.createDirectory(at: baseExtractURL, withIntermediateDirectories: true, attributes: nil)
 
-        await log("Extracting IPA: \(ipaURL.lastPathComponent)")
+        await log("IPAを展開中: \(ipaURL.lastPathComponent)")
         try fileManager.unzipItem(at: ipaURL, to: baseExtractURL)
 
         let appBundleURL = try findAppBundle(in: baseExtractURL)
@@ -60,8 +60,8 @@ final class IPAProcessor {
         let baseName = ipaURL.deletingPathExtension().lastPathComponent
         var outputs: [URL] = []
 
-        await log("Original Bundle ID: \(originalBundleID)")
-        await log("Executable: \(executableName)")
+        await log("元のBundle ID: \(originalBundleID)")
+        await log("実行ファイル: \(executableName)")
 
         for (index, rawSuffix) in suffixes.enumerated() {
             let suffix = sanitizeSuffix(rawSuffix)
@@ -90,7 +90,7 @@ final class IPAProcessor {
                 try fileManager.copyItem(at: dylibURL, to: copiedURL)
                 let installPath = "@executable_path/dylibs/\(dylibURL.lastPathComponent)"
                 try injector.injectDylib(at: executableURL, loadPath: installPath)
-                await log("[\(suffix)] Copied and injected \(dylibURL.lastPathComponent)")
+                await log("[\(suffix)] コピー&注入: \(dylibURL.lastPathComponent)")
             }
 
             let outputURL = sessionOutputURL.appendingPathComponent("\(baseName)-\(suffix).ipa")
@@ -98,7 +98,7 @@ final class IPAProcessor {
                 try fileManager.removeItem(at: outputURL)
             }
 
-            await log("[\(suffix)] Repacking IPA")
+            await log("[\(suffix)] IPAを再パック中")
             try fileManager.zipItem(
                 at: variantRootURL,
                 to: outputURL,

@@ -19,11 +19,11 @@ enum MachOInjectorError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedBinary:
-            return "Unsupported Mach-O format. Only 64-bit Mach-O is supported."
+            return "未対応のMach-O形式です。64-bit Mach-Oのみ対応しています。"
         case .insufficientHeaderPadding(let path):
-            return "Not enough Mach-O header padding to inject \(path)."
+            return "\(path) を注入するためのMach-Oヘッダ余白が不足しています。"
         case .malformedBinary(let message):
-            return "Malformed Mach-O binary: \(message)"
+            return "不正なMach-Oバイナリ: \(message)"
         }
     }
 }
