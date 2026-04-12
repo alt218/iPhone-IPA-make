@@ -359,6 +359,9 @@ final class AppViewModel: ObservableObject {
             appendLog(exportStatus)
             appendLog("コピー先: \(destAppURL.path)")
             let expectedExecutable = resolveExecutableName(fromCandidates: candidatePaths)
+            if let hidePath = candidatePaths.first(where: { $0.contains("/var/containers/Bundle/Application") || $0.contains("/private/var/containers/Bundle/Application") }) {
+                appendLog("hide環境の可能性: \(hidePath)")
+            }
             let copyResult = try copyAppBundleWithFallback(
                 fromCandidates: candidatePaths,
                 to: destAppURL,
