@@ -248,6 +248,16 @@ final class AppViewModel: ObservableObject {
             return
         }
 
+        let rootlessContainers = [
+            URL(fileURLWithPath: "/var/containers/Bundle/Application", isDirectory: true),
+            URL(fileURLWithPath: "/private/var/containers/Bundle/Application", isDirectory: true)
+        ]
+        var rootlessContainerApps: [InstalledApp] = []
+        for root in rootlessContainers {
+            rootlessContainerApps.append(contentsOf: scanApps(in: root))
+            rootlessContainerApps.append(contentsOf: scanAppsOneLevel(in: root))
+        }
+
         let roots = [
             URL(fileURLWithPath: "/Applications", isDirectory: true),
             URL(fileURLWithPath: "/var/containers/Bundle/Application", isDirectory: true),
@@ -279,13 +289,15 @@ final class AppViewModel: ObservableObject {
         } else {
             base = storeApps.isEmpty ? apps : storeApps
         }
-        let unique = Dictionary(grouping: base, by: { $0.bundleId })
+        let mergeSource = isRootlessEnvironment() ? (base + rootlessContainerApps) : base
+        let unique = Dictionary(grouping: mergeSource, by: { $0.bundleId })
             .compactMap { $0.value.first }
             .sorted { $0.name < $1.name }
 
         installedApps = unique
         if isRootlessEnvironment() {
-            appendLog("rootless環境: 全アプリを表示中: \(installedApps.count) 件")
+            let containerCount = rootlessContainerApps.count
+            appendLog("rootless環境: 全アプリを表示中: \(installedApps.count) 件（/var/containers: \(containerCount) 件）")
         } else if storeApps.isEmpty {
             appendLog("App Store判定ができないため、全アプリを表示中: \(installedApps.count) 件")
         } else {
@@ -346,9 +358,14 @@ final class AppViewModel: ObservableObject {
             exportStatus = "アプリをコピー中..."
             appendLog(exportStatus)
             appendLog("コピー先: \(destAppURL.path)")
-            let copyResult = try copyAppBundleWithFallback(fromCandidates: candidatePaths, to: destAppURL)
+            let expectedExecutable = resolveExecutableName(fromCandidates: candidatePaths)
+            let copyResult = try copyAppBundleWithFallback(
+                fromCandidates: candidatePaths,
+                to: destAppURL,
+                expectedExecutable: expectedExecutable
+            )
             let skipped = copyResult.skippedFiles
-            let detectedExecutable = copyResult.detectedExecutable
+            let detectedExecutable = copyResult.detectedExecutable ?? expectedExecutable
             if !ensureInfoPlist(for: destAppURL, fromCandidates: candidatePaths) {
                 if writeFallbackInfoPlist(for: destAppURL, app: app, executableName: detectedExecutable) {
                     appendLog("Info.plist を暫定生成しました")
@@ -847,7 +864,11 @@ final class AppViewModel: ObservableObject {
         return results
     }
 
-    private func copyAppBundleWithFallback(fromCandidates candidates: [String], to destination: URL) throws -> (skippedFiles: [String], detectedExecutable: String?) {
+    private func copyAppBundleWithFallback(
+        fromCandidates candidates: [String],
+        to destination: URL,
+        expectedExecutable: String?
+    ) throws -> (skippedFiles: [String], detectedExecutable: String?) {
         var lastError: Error?
         var skippedFiles: [String] = []
         var detectedExecutable: String?
@@ -862,7 +883,11 @@ final class AppViewModel: ObservableObject {
                 lastError = error
                 appendLog("コピー失敗（直コピー）: \(error.localizedDescription)")
                 do {
-                    skippedFiles = try copyDirectorySkippingUnreadable(from: sourceURL, to: destination)
+                    skippedFiles = try copyDirectorySkippingUnreadable(
+                        from: sourceURL,
+                        to: destination,
+                        expectedExecutable: expectedExecutable
+                    )
                     detectedExecutable = guessExecutableName(in: sourceURL)
                     appendLog("コピー完了（スキップあり）")
                     return (skippedFiles, detectedExecutable)
@@ -878,7 +903,11 @@ final class AppViewModel: ObservableObject {
         return (skippedFiles, detectedExecutable)
     }
 
-    private func copyDirectorySkippingUnreadable(from source: URL, to destination: URL) throws -> [String] {
+    private func copyDirectorySkippingUnreadable(
+        from source: URL,
+        to destination: URL,
+        expectedExecutable: String?
+    ) throws -> [String] {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true, attributes: nil)
         guard let enumerator = FileManager.default.enumerator(
             at: source,
@@ -900,6 +929,18 @@ final class AppViewModel: ObservableObject {
                 try FileManager.default.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
                 try FileManager.default.copyItem(at: itemURL, to: targetURL)
             } catch {
+                if let expectedExecutable,
+                   itemURL.lastPathComponent == expectedExecutable,
+                   let data = try? Data(contentsOf: itemURL) {
+                    do {
+                        try FileManager.default.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
+                        try data.write(to: targetURL)
+                        appendLog("実行ファイルを復元: \(expectedExecutable)")
+                        continue
+                    } catch {
+                        appendLog("実行ファイル復元失敗: \(error.localizedDescription)")
+                    }
+                }
                 appendLog("スキップ: \(relative)")
                 skipped.append(relative)
             }
@@ -991,6 +1032,20 @@ final class AppViewModel: ObservableObject {
             if isDirectory { continue }
             if item.pathExtension.isEmpty {
                 return item.lastPathComponent
+            }
+        }
+        return nil
+    }
+
+    private func resolveExecutableName(fromCandidates candidates: [String]) -> String? {
+        for candidatePath in candidates {
+            let appURL = URL(fileURLWithPath: candidatePath, isDirectory: true)
+            let infoURL = appURL.appendingPathComponent("Info.plist")
+            if let data = try? Data(contentsOf: infoURL),
+               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+               let executable = plist["CFBundleExecutable"] as? String,
+               !executable.isEmpty {
+                return executable
             }
         }
         return nil
