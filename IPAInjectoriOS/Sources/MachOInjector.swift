@@ -229,11 +229,11 @@ private extension Data {
     }
 
     func readCString(at offset: Int, upperBound: Int) throws -> String {
-        guard offset < min(upperBound, count) else {
+        guard offset < Swift.min(upperBound, count) else {
             throw MachOInjectorError.malformedBinary("string offset out of bounds")
         }
         var end = offset
-        let bound = min(upperBound, count)
+        let bound = Swift.min(upperBound, count)
         while end < bound, self[end] != 0 {
             end += 1
         }

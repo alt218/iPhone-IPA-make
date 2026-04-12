@@ -46,7 +46,7 @@ final class IPAProcessor {
         let baseExtractURL = tempRoot.appendingPathComponent("base", isDirectory: true)
         try fileManager.createDirectory(at: baseExtractURL, withIntermediateDirectories: true, attributes: nil)
 
-        try await log("Extracting IPA: \(ipaURL.lastPathComponent)")
+        await log("Extracting IPA: \(ipaURL.lastPathComponent)")
         try fileManager.unzipItem(at: ipaURL, to: baseExtractURL)
 
         let appBundleURL = try findAppBundle(in: baseExtractURL)
@@ -60,8 +60,8 @@ final class IPAProcessor {
         let baseName = ipaURL.deletingPathExtension().lastPathComponent
         var outputs: [URL] = []
 
-        try await log("Original Bundle ID: \(originalBundleID)")
-        try await log("Executable: \(executableName)")
+        await log("Original Bundle ID: \(originalBundleID)")
+        await log("Executable: \(executableName)")
 
         for (index, rawSuffix) in suffixes.enumerated() {
             let suffix = sanitizeSuffix(rawSuffix)
@@ -75,7 +75,7 @@ final class IPAProcessor {
             let bundleID = "\(originalBundleID).\(suffix)"
             variantInfo["CFBundleIdentifier"] = bundleID
             try savePlist(variantInfo, to: variantInfoURL)
-            try await log("[\(suffix)] Bundle ID -> \(bundleID)")
+            await log("[\(suffix)] Bundle ID -> \(bundleID)")
 
             let dylibDirectoryURL = variantAppURL.appendingPathComponent("dylibs", isDirectory: true)
             try fileManager.createDirectory(at: dylibDirectoryURL, withIntermediateDirectories: true, attributes: nil)
@@ -90,7 +90,7 @@ final class IPAProcessor {
                 try fileManager.copyItem(at: dylibURL, to: copiedURL)
                 let installPath = "@executable_path/dylibs/\(dylibURL.lastPathComponent)"
                 try injector.injectDylib(at: executableURL, loadPath: installPath)
-                try await log("[\(suffix)] Copied and injected \(dylibURL.lastPathComponent)")
+                await log("[\(suffix)] Copied and injected \(dylibURL.lastPathComponent)")
             }
 
             let outputURL = sessionOutputURL.appendingPathComponent("\(baseName)-\(suffix).ipa")
@@ -98,7 +98,7 @@ final class IPAProcessor {
                 try fileManager.removeItem(at: outputURL)
             }
 
-            try await log("[\(suffix)] Repacking IPA")
+            await log("[\(suffix)] Repacking IPA")
             try fileManager.zipItem(
                 at: variantRootURL,
                 to: outputURL,

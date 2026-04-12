@@ -54,6 +54,18 @@ jobs:
           name: IPAInjectoriOS-unsigned
           path: IPAInjectoriOS.ipa
 
+      - name: Show Build Errors
+        if: always()
+        run: |
+          if [ -f xcodebuild.log ]; then
+            echo "==== xcodebuild error lines ===="
+            grep -n "error:" xcodebuild.log || true
+            echo "==== SwiftCompile lines ===="
+            grep -n "SwiftCompile" xcodebuild.log || true
+            echo "==== Last 200 lines ===="
+            tail -n 200 xcodebuild.log || true
+          fi
+
       - name: Upload Build Log
         if: always()
         uses: actions/upload-artifact@v4
