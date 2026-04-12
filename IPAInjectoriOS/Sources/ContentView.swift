@@ -593,12 +593,13 @@ struct ContentView: View {
                     viewModel.isSelectingInstalledApps = false
                 }
             }
-            if viewModel.enableBatchExport {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("一括吸い出し") {
-                        viewModel.exportSelectedAppsToIPA()
-                    }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("一括吸い出し") {
+                    viewModel.exportSelectedAppsToIPA()
                 }
+                .disabled(!viewModel.enableBatchExport)
+                .opacity(viewModel.enableBatchExport ? 1 : 0)
+                .accessibilityHidden(!viewModel.enableBatchExport)
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("更新") {
