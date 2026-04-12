@@ -273,18 +273,21 @@ final class AppViewModel: ObservableObject {
         }
 
         let storeApps = apps.filter { isAppStoreApp($0.appURL) }
-        let base = storeApps.isEmpty ? apps : storeApps
+        let base: [InstalledApp]
+        if isRootlessEnvironment() {
+            base = apps
+        } else {
+            base = storeApps.isEmpty ? apps : storeApps
+        }
         let unique = Dictionary(grouping: base, by: { $0.bundleId })
             .compactMap { $0.value.first }
             .sorted { $0.name < $1.name }
 
         installedApps = unique
-        if storeApps.isEmpty {
-            if isLikelyRootlessOnly(apps: installedApps) {
-                appendLog("rootless環境のためApp Store判定不可。脱獄アプリのみ表示中: \(installedApps.count) 件")
-            } else {
-                appendLog("App Store判定ができないため、全アプリを表示中: \(installedApps.count) 件")
-            }
+        if isRootlessEnvironment() {
+            appendLog("rootless環境: 全アプリを表示中: \(installedApps.count) 件")
+        } else if storeApps.isEmpty {
+            appendLog("App Store判定ができないため、全アプリを表示中: \(installedApps.count) 件")
         } else {
             appendLog("App Storeアプリ: \(installedApps.count) 件")
         }
