@@ -392,6 +392,7 @@ final class AppViewModel: ObservableObject {
             }
             if !ensureExecutable(for: destAppURL, fromCandidates: candidatePaths, expectedExecutable: detectedExecutable) {
                 appendLog("警告: 実行ファイルをコピーできませんでした: \(detectedExecutable)")
+                appendExecutableDiagnostics(expectedExecutable: detectedExecutable, destAppURL: destAppURL, candidates: candidatePaths)
             }
             var skippedLogURL: URL?
             if !skipped.isEmpty {
@@ -1038,6 +1039,25 @@ final class AppViewModel: ObservableObject {
             }
         }
         return false
+    }
+
+    private func appendExecutableDiagnostics(expectedExecutable: String, destAppURL: URL, candidates: [String]) {
+        let destExecURL = destAppURL.appendingPathComponent(expectedExecutable)
+        appendLog("診断: dest exists=\(FileManager.default.fileExists(atPath: destExecURL.path)) path=\(destExecURL.path)")
+        for candidatePath in candidates {
+            let appURL = URL(fileURLWithPath: candidatePath, isDirectory: true)
+            let sourceExecURL = appURL.appendingPathComponent(expectedExecutable)
+            let exists = FileManager.default.fileExists(atPath: sourceExecURL.path)
+            let readable = FileManager.default.isReadableFile(atPath: sourceExecURL.path)
+            appendLog("診断: src exists=\(exists) readable=\(readable) path=\(sourceExecURL.path)")
+            let names = executableCandidates(in: appURL)
+            if names.isEmpty {
+                appendLog("診断: 実行ファイル候補=取得不可 or なし (\(appURL.path))")
+            } else {
+                let preview = names.prefix(5).joined(separator: ", ")
+                appendLog("診断: 実行ファイル候補=\(preview) (\(appURL.path))")
+            }
+        }
     }
 
     private func writeFallbackInfoPlist(for destAppURL: URL, app: InstalledApp, executableName: String?) -> Bool {
