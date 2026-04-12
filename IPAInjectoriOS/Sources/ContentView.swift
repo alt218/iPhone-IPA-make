@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @ObservedObject var viewModel: AppViewModel
 
+    private let ipaType = UTType(filenameExtension: "ipa") ?? .data
     private let dylibType = UTType(filenameExtension: "dylib") ?? .data
 
     var body: some View {
@@ -21,6 +22,13 @@ struct ContentView: View {
             }
             .navigationTitle("IPA一括生成")
             .fileImporter(
+                isPresented: $viewModel.isImportingIPA,
+                allowedContentTypes: [ipaType],
+                allowsMultipleSelection: false
+            ) { result in
+                viewModel.handleIPAImport(result)
+            }
+            .fileImporter(
                 isPresented: $viewModel.isImportingDylibs,
                 allowedContentTypes: [dylibType],
                 allowsMultipleSelection: true
@@ -29,6 +37,9 @@ struct ContentView: View {
             }
             .sheet(isPresented: $viewModel.isSelectingIPAList) {
                 ipaListSheet
+            }
+            .sheet(isPresented: $viewModel.isSelectingInstalledApps) {
+                installedAppsSheet
             }
         }
     }
@@ -50,9 +61,35 @@ struct ContentView: View {
                         .font(.headline)
                     Text(viewModel.ipaLabel)
                         .foregroundStyle(viewModel.ipaURL == nil ? .secondary : .primary)
-                    Button("IPAを選択") {
-                        viewModel.refreshAvailableIPAs()
-                        viewModel.isSelectingIPAList = true
+                    HStack {
+                        Button("IPA一覧") {
+                            viewModel.refreshAvailableIPAs()
+                            viewModel.isSelectingIPAList = true
+                        }
+                        Button("アプリ一覧") {
+                            viewModel.refreshInstalledApps()
+                            viewModel.isSelectingInstalledApps = true
+                        }
+                    }
+                    Button("ファイルから追加") {
+                        viewModel.isImportingIPA = true
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("インポート済みIPA")
+                        .font(.headline)
+                    if viewModel.availableIPAs.isEmpty {
+                        Text("まだありません")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.availableIPAs.prefix(3), id: \.path) { url in
+                            Text(url.lastPathComponent)
+                                .font(.body.monospaced())
+                                .lineLimit(1)
+                        }
                     }
                 }
 
@@ -194,8 +231,13 @@ struct ContentView: View {
         NavigationStack {
             List {
                 if viewModel.availableIPAs.isEmpty {
-                    Text("IPAが見つかりません")
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("IPAが見つかりません")
+                            .foregroundStyle(.secondary)
+                        Button("ファイルから追加") {
+                            viewModel.isImportingIPA = true
+                        }
+                    }
                 } else {
                     ForEach(viewModel.availableIPAs, id: \.path) { url in
                         Button {
@@ -221,6 +263,11 @@ struct ContentView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button("追加") {
+                        viewModel.isImportingIPA = true
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("更新") {
                         viewModel.refreshAvailableIPAs()
                     }
@@ -228,6 +275,56 @@ struct ContentView: View {
             }
             .onAppear {
                 viewModel.refreshAvailableIPAs()
+            }
+        }
+    }
+
+    private var installedAppsSheet: some View {
+        NavigationStack {
+            List {
+                if viewModel.installedApps.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("アプリ一覧を取得できません")
+                            .foregroundStyle(.secondary)
+                        Text("脱獄環境でのみ表示されます。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Button("再読み込み") {
+                            viewModel.refreshInstalledApps()
+                        }
+                    }
+                } else {
+                    ForEach(viewModel.installedApps) { app in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(app.name)
+                                .lineLimit(1)
+                            Text(app.bundleId)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Button("IPAとして吸い出す") {
+                                viewModel.exportInstalledAppToIPA(app)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .navigationTitle("インストール済みアプリ")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("閉じる") {
+                        viewModel.isSelectingInstalledApps = false
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("更新") {
+                        viewModel.refreshInstalledApps()
+                    }
+                }
+            }
+            .onAppear {
+                viewModel.refreshInstalledApps()
             }
         }
     }

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import ZIPFoundation
 
 enum GenerationMode: String, CaseIterable, Identifiable {
     case count
@@ -19,9 +20,17 @@ enum GenerationMode: String, CaseIterable, Identifiable {
 
 @MainActor
 final class AppViewModel: ObservableObject {
+    struct InstalledApp: Identifiable {
+        let id: String
+        let name: String
+        let bundleId: String
+        let appURL: URL
+    }
+
     @Published var ipaURL: URL?
     @Published var dylibURLs: [URL] = []
     @Published var availableIPAs: [URL] = []
+    @Published var installedApps: [InstalledApp] = []
     @Published var mode: GenerationMode = .count {
         didSet { settings.save(mode: mode) }
     }
@@ -31,7 +40,9 @@ final class AppViewModel: ObservableObject {
     @Published var suffixInput: String = "a1, a2, a3" {
         didSet { settings.save(suffixInput: suffixInput) }
     }
+    @Published var isImportingIPA = false
     @Published var isSelectingIPAList = false
+    @Published var isSelectingInstalledApps = false
     @Published var isImportingDylibs = false
     @Published var isProcessing = false
     @Published var errorMessage: String?
@@ -56,14 +67,76 @@ final class AppViewModel: ObservableObject {
     }
 
     func refreshAvailableIPAs() {
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let ipaFiles = collectIPAFiles(in: documents)
+        let ipaFiles = collectIPAFiles(in: ipaStorageDirectory())
         availableIPAs = ipaFiles.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     func selectIPA(_ url: URL) {
         ipaURL = url
         isSelectingIPAList = false
+    }
+
+    func handleIPAImport(_ result: Result<[URL], Error>) {
+        do {
+            guard let sourceURL = try result.get().first else { return }
+            let destDir = ipaStorageDirectory()
+            try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
+            let destURL = uniqueDestinationURL(in: destDir, name: sourceURL.lastPathComponent)
+            try FileManager.default.copyItem(at: sourceURL, to: destURL)
+            refreshAvailableIPAs()
+            selectIPA(destURL)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func refreshInstalledApps() {
+        installedApps = []
+        let roots = [
+            URL(fileURLWithPath: "/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/var/containers/Bundle/Application", isDirectory: true)
+        ]
+
+        var apps: [InstalledApp] = []
+        for root in roots {
+            apps.append(contentsOf: scanApps(in: root))
+        }
+
+        let unique = Dictionary(grouping: apps, by: { $0.bundleId })
+            .compactMap { $0.value.first }
+            .sorted { $0.name < $1.name }
+
+        installedApps = unique
+    }
+
+    func exportInstalledAppToIPA(_ app: InstalledApp) {
+        do {
+            let destDir = ipaStorageDirectory()
+            try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
+            let fileName = "\(app.name).ipa"
+            let destURL = uniqueDestinationURL(in: destDir, name: fileName)
+
+            let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("IPAExtract-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true, attributes: nil)
+            defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+            let payloadURL = tempRoot.appendingPathComponent("Payload", isDirectory: true)
+            try FileManager.default.createDirectory(at: payloadURL, withIntermediateDirectories: true, attributes: nil)
+            let destAppURL = payloadURL.appendingPathComponent(app.appURL.lastPathComponent)
+            try FileManager.default.copyItem(at: app.appURL, to: destAppURL)
+
+            try FileManager.default.zipItem(
+                at: payloadURL,
+                to: destURL,
+                shouldKeepParent: true,
+                compressionMethod: .deflate
+            )
+
+            refreshAvailableIPAs()
+            selectIPA(destURL)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func handleDylibSelection(_ result: Result<[URL], Error>) {
@@ -163,6 +236,63 @@ final class AppViewModel: ObservableObject {
             }
         }
         return results
+    }
+
+    private func scanApps(in root: URL) -> [InstalledApp] {
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var results: [InstalledApp] = []
+        for case let url as URL in enumerator {
+            if url.pathExtension == "app" {
+                if let app = makeInstalledApp(from: url) {
+                    results.append(app)
+                }
+                enumerator.skipDescendants()
+            }
+        }
+        return results
+    }
+
+    private func makeInstalledApp(from appURL: URL) -> InstalledApp? {
+        let infoURL = appURL.appendingPathComponent("Info.plist")
+        guard let data = try? Data(contentsOf: infoURL) else { return nil }
+        guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+            return nil
+        }
+        guard let bundleId = plist["CFBundleIdentifier"] as? String else { return nil }
+        let name = (plist["CFBundleDisplayName"] as? String)
+            ?? (plist["CFBundleName"] as? String)
+            ?? appURL.deletingPathExtension().lastPathComponent
+        return InstalledApp(id: bundleId, name: name, bundleId: bundleId, appURL: appURL)
+    }
+
+    private func ipaStorageDirectory() -> URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documents.appendingPathComponent("ImportedIPAs", isDirectory: true)
+    }
+
+    private func uniqueDestinationURL(in directory: URL, name: String) -> URL {
+        let baseURL = directory.appendingPathComponent(name)
+        if !FileManager.default.fileExists(atPath: baseURL.path) {
+            return baseURL
+        }
+        let stem = baseURL.deletingPathExtension().lastPathComponent
+        let ext = baseURL.pathExtension
+        var index = 1
+        while true {
+            let candidate = directory.appendingPathComponent("\(stem)-\(index).\(ext)")
+            if !FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            index += 1
+        }
     }
 
     private func appendLog(_ line: String) {
