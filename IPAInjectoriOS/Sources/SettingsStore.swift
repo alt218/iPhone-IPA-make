@@ -5,6 +5,9 @@ struct SettingsSnapshot {
     let count: Int
     let suffixInput: String
     let outputFolderName: String
+    let outputNameTemplate: String
+    let installedAppSort: String
+    let dylibPresetsData: Data?
     let enableHistory: Bool
     let enableFilters: Bool
     let enableBatchExport: Bool
@@ -25,6 +28,9 @@ final class SettingsStore {
         static let count = "count"
         static let suffixInput = "suffixInput"
         static let outputFolderName = "outputFolderName"
+        static let outputNameTemplate = "outputNameTemplate"
+        static let installedAppSort = "installedAppSort"
+        static let dylibPresetsData = "dylibPresetsData"
         static let enableHistory = "enableHistory"
         static let enableFilters = "enableFilters"
         static let enableBatchExport = "enableBatchExport"
@@ -42,6 +48,9 @@ final class SettingsStore {
         let mode = GenerationMode(rawValue: defaults.string(forKey: Key.mode) ?? GenerationMode.count.rawValue) ?? .count
         let suffixInput = defaults.string(forKey: Key.suffixInput) ?? "a1, a2, a3"
         let outputFolderName = defaults.string(forKey: Key.outputFolderName) ?? "GeneratedIPAs"
+        let outputNameTemplate = defaults.string(forKey: Key.outputNameTemplate) ?? "{name}"
+        let installedAppSort = defaults.string(forKey: Key.installedAppSort) ?? "name"
+        let dylibPresetsData = defaults.data(forKey: Key.dylibPresetsData)
         let enableHistory = defaults.object(forKey: Key.enableHistory) as? Bool ?? true
         let enableFilters = defaults.object(forKey: Key.enableFilters) as? Bool ?? true
         let enableBatchExport = defaults.object(forKey: Key.enableBatchExport) as? Bool ?? true
@@ -57,6 +66,9 @@ final class SettingsStore {
             count: max(count, 1),
             suffixInput: suffixInput,
             outputFolderName: outputFolderName,
+            outputNameTemplate: outputNameTemplate,
+            installedAppSort: installedAppSort,
+            dylibPresetsData: dylibPresetsData,
             enableHistory: enableHistory,
             enableFilters: enableFilters,
             enableBatchExport: enableBatchExport,
@@ -84,6 +96,18 @@ final class SettingsStore {
 
     func saveOutputFolderName(_ value: String) {
         defaults.set(value, forKey: Key.outputFolderName)
+    }
+
+    func saveOutputNameTemplate(_ value: String) {
+        defaults.set(value, forKey: Key.outputNameTemplate)
+    }
+
+    func saveInstalledAppSort(_ value: String) {
+        defaults.set(value, forKey: Key.installedAppSort)
+    }
+
+    func saveDylibPresetsData(_ value: Data?) {
+        defaults.set(value, forKey: Key.dylibPresetsData)
     }
 
     func saveFeatureFlag(_ value: Bool, forKey key: String) {

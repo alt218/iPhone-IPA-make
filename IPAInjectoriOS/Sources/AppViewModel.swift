@@ -18,12 +18,31 @@ enum GenerationMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum AppSortOrder: String, CaseIterable, Identifiable {
+    case name
+    case recent
+    case size
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .name: return "名前順"
+        case .recent: return "最近起動"
+        case .size: return "容量"
+        }
+    }
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     struct HistoryItem: Identifiable {
         let id = UUID()
         let date: Date
         let message: String
+        let detail: String?
+        let relatedURLs: [URL]
+        let isError: Bool
     }
 
     struct InstalledApp: Identifiable {
@@ -31,6 +50,20 @@ final class AppViewModel: ObservableObject {
         let name: String
         let bundleId: String
         let appURL: URL
+        let lastModified: Date?
+        let sizeBytes: Int64?
+    }
+
+    struct DylibPreset: Identifiable, Codable, Hashable {
+        let id: UUID
+        var name: String
+        var paths: [String]
+
+        init(id: UUID = UUID(), name: String, paths: [String]) {
+            self.id = id
+            self.name = name
+            self.paths = paths
+        }
     }
 
     @Published var ipaURL: URL?
@@ -38,6 +71,9 @@ final class AppViewModel: ObservableObject {
     @Published var availableIPAs: [URL] = []
     @Published var installedApps: [InstalledApp] = []
     @Published var installedAppsQuery: String = ""
+    @Published var installedAppSort: AppSortOrder = .name {
+        didSet { settings.saveInstalledAppSort(installedAppSort.rawValue) }
+    }
     @Published var enableHistory = true {
         didSet { settings.saveFeatureFlag(enableHistory, forKey: "enableHistory") }
     }
@@ -69,6 +105,9 @@ final class AppViewModel: ObservableObject {
                 .appendingPathComponent(outputFolderName, isDirectory: true)
         }
     }
+    @Published var outputNameTemplate: String = "{name}" {
+        didSet { settings.saveOutputNameTemplate(outputNameTemplate) }
+    }
     @Published var overrideDisplayName: String = "" {
         didSet { settings.saveOverrideDisplayName(overrideDisplayName) }
     }
@@ -97,6 +136,11 @@ final class AppViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var logText = ""
     @Published var generatedFiles: [URL] = []
+    @Published var selectedInstalledAppIDs: Set<String> = []
+    @Published var isSelectingMultipleApps = false
+    @Published var dylibPresets: [DylibPreset] = []
+    @Published var selectedDylibPresetID: UUID?
+    @Published var newPresetName: String = ""
 
     var outputDirectoryURL: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("GeneratedIPAs", isDirectory: true)
@@ -108,6 +152,8 @@ final class AppViewModel: ObservableObject {
         mode = snapshot.mode
         countValue = snapshot.count
         suffixInput = snapshot.suffixInput
+        outputNameTemplate = snapshot.outputNameTemplate
+        installedAppSort = AppSortOrder(rawValue: snapshot.installedAppSort) ?? .name
         enableHistory = snapshot.enableHistory
         enableFilters = snapshot.enableFilters
         enableBatchExport = snapshot.enableBatchExport
@@ -121,6 +167,10 @@ final class AppViewModel: ObservableObject {
         if let path = snapshot.overrideIconPath {
             overrideIconURL = URL(fileURLWithPath: path)
         }
+        if let data = snapshot.dylibPresetsData,
+           let presets = try? JSONDecoder().decode([DylibPreset].self, from: data) {
+            dylibPresets = presets
+        }
         outputDirectoryURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(outputFolderName, isDirectory: true)
     }
@@ -130,12 +180,14 @@ final class AppViewModel: ObservableObject {
     }
 
     func refreshAvailableIPAs() {
-        let ipaFiles = collectIPAFiles(in: ipaStorageDirectory())
+        let ipaFiles = ipaStorageDirectories().flatMap { collectIPAFiles(in: $0) }
         availableIPAs = ipaFiles.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     func selectIPA(_ url: URL) {
         ipaURL = url
+        pendingDeleteIPA = nil
+        isConfirmingDelete = false
         isSelectingIPAList = false
     }
 
@@ -162,6 +214,8 @@ final class AppViewModel: ObservableObject {
     func startIPAImportFromSheet() {
         isSelectingIPAList = false
         isSelectingInstalledApps = false
+        pendingDeleteIPA = nil
+        isConfirmingDelete = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.isImportingIPA = true
         }
@@ -259,7 +313,7 @@ final class AppViewModel: ObservableObject {
             appendLog(exportStatus)
             let destDir = ipaStorageDirectory()
             try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
-            let fileName = "\(app.name).ipa"
+            let fileName = outputFileName(for: app)
             let destURL = uniqueDestinationURL(in: destDir, name: fileName)
 
             let tempRoot = destDir.appendingPathComponent("ExportWork-\(UUID().uuidString)", isDirectory: true)
@@ -275,11 +329,28 @@ final class AppViewModel: ObservableObject {
             appendLog("コピー先: \(destAppURL.path)")
             let skipped = try copyAppBundleWithFallback(fromCandidates: candidatePaths, to: destAppURL)
             if !ensureInfoPlist(for: destAppURL, fromCandidates: candidatePaths) {
-                appendLog("警告: Info.plist を取得できませんでした")
+                if writeFallbackInfoPlist(for: destAppURL, app: app) {
+                    appendLog("Info.plist を暫定生成しました")
+                } else {
+                    appendLog("警告: Info.plist を取得できませんでした")
+                }
             }
+            var skippedLogURL: URL?
             if !skipped.isEmpty {
                 let logURL = try writeSkippedFilesLog(for: app.name, skipped: skipped, in: destDir)
+                skippedLogURL = logURL
                 appendLog("スキップ一覧を書き出しました: \(logURL.lastPathComponent)")
+                if enableSkipAnalysis {
+                    let warnings = analyzeSkippedFiles(skipped, in: destAppURL)
+                    if !warnings.isEmpty {
+                        appendLog("スキップ解析: 警告 \(warnings.count) 件")
+                        for warning in warnings {
+                            appendLog("警告: \(warning)")
+                        }
+                    } else {
+                        appendLog("スキップ解析: 重大な警告はありません")
+                    }
+                }
             }
 
             exportStatus = "IPAを作成中..."
@@ -293,6 +364,25 @@ final class AppViewModel: ObservableObject {
 
             refreshAvailableIPAs()
             selectIPA(destURL)
+            if enableValidation {
+                let warnings = validateIPA(at: destURL)
+                if warnings.isEmpty {
+                    appendLog("IPA検証: OK")
+                } else {
+                    appendLog("IPA検証: 警告 \(warnings.count) 件")
+                    for warning in warnings {
+                        appendLog("警告: \(warning)")
+                    }
+                }
+            }
+
+            let logURL = writeOperationLog(for: app.name, in: destDir)
+            recordHistory(
+                message: "吸い出し完了: \(app.name)",
+                detail: app.bundleId,
+                relatedURLs: [destURL, logURL, skippedLogURL].compactMap { $0 },
+                isError: false
+            )
             exportStatus = "吸い出し完了: \(destURL.lastPathComponent)"
             appendLog(exportStatus)
             isExportingIPA = false
@@ -302,6 +392,13 @@ final class AppViewModel: ObservableObject {
             appendLog(exportStatus)
             let nsError = error as NSError
             appendLog("エラー詳細: domain=\(nsError.domain) code=\(nsError.code)")
+            let logURL = writeOperationLog(for: app.name, in: ipaStorageDirectory())
+            recordHistory(
+                message: "吸い出し失敗: \(app.name)",
+                detail: error.localizedDescription,
+                relatedURLs: [logURL].compactMap { $0 },
+                isError: true
+            )
             isExportingIPA = false
         }
     }
@@ -370,12 +467,34 @@ final class AppViewModel: ObservableObject {
 
     func filteredInstalledApps() -> [InstalledApp] {
         let query = installedAppsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filtered: [InstalledApp]
         if query.isEmpty {
-            return installedApps
+            filtered = installedApps
+        } else {
+            filtered = installedApps.filter {
+                $0.name.localizedCaseInsensitiveContains(query)
+                || $0.bundleId.localizedCaseInsensitiveContains(query)
+            }
         }
-        return installedApps.filter {
-            $0.name.localizedCaseInsensitiveContains(query)
-            || $0.bundleId.localizedCaseInsensitiveContains(query)
+        return sortApps(filtered)
+    }
+
+    private func sortApps(_ apps: [InstalledApp]) -> [InstalledApp] {
+        switch installedAppSort {
+        case .name:
+            return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        case .recent:
+            return apps.sorted {
+                let lhs = $0.lastModified ?? .distantPast
+                let rhs = $1.lastModified ?? .distantPast
+                return lhs > rhs
+            }
+        case .size:
+            return apps.sorted {
+                let lhs = $0.sizeBytes ?? directorySize(for: $0.appURL)
+                let rhs = $1.sizeBytes ?? directorySize(for: $1.appURL)
+                return lhs > rhs
+            }
         }
     }
 
@@ -435,12 +554,26 @@ final class AppViewModel: ObservableObject {
                 await MainActor.run {
                     self.generatedFiles = result.outputURLs
                     self.appendLog("完了: \(result.outputURLs.count) 個のIPAを生成しました")
+                    let logURL = self.writeOperationLog(for: "生成", in: self.outputDirectoryURL)
+                    self.recordHistory(
+                        message: "生成完了: \(result.outputURLs.count) 件",
+                        detail: self.ipaURL?.lastPathComponent,
+                        relatedURLs: (result.outputURLs + [logURL]).compactMap { $0 },
+                        isError: false
+                    )
                     self.isProcessing = false
                 }
             } catch {
                 await MainActor.run {
                     self.errorMessage = error.localizedDescription
                     self.appendLog("エラー: \(error.localizedDescription)")
+                    let logURL = self.writeOperationLog(for: "生成", in: self.outputDirectoryURL)
+                    self.recordHistory(
+                        message: "生成失敗",
+                        detail: error.localizedDescription,
+                        relatedURLs: [logURL].compactMap { $0 },
+                        isError: true
+                    )
                     self.isProcessing = false
                 }
             }
@@ -463,6 +596,17 @@ final class AppViewModel: ObservableObject {
             }
         }
         return results
+    }
+
+    private func ipaStorageDirectories() -> [URL] {
+        var dirs: [URL] = []
+        dirs.append(ipaStorageDirectory())
+        let fallback = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ImportedIPAs", isDirectory: true)
+        if fallback != dirs.first {
+            dirs.append(fallback)
+        }
+        return dirs
     }
 
     private func scanApps(in root: URL) -> [InstalledApp] {
@@ -552,11 +696,22 @@ final class AppViewModel: ObservableObject {
         let name = (plist["CFBundleDisplayName"] as? String)
             ?? (plist["CFBundleName"] as? String)
             ?? appURL.deletingPathExtension().lastPathComponent
-        return InstalledApp(id: bundleId, name: name, bundleId: bundleId, appURL: appURL)
+        let lastModified = (try? appURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+        return InstalledApp(
+            id: bundleId,
+            name: name,
+            bundleId: bundleId,
+            appURL: appURL,
+            lastModified: lastModified,
+            sizeBytes: nil
+        )
     }
 
     private func ipaStorageDirectory() -> URL {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        if enableOutputFolder {
+            return documents.appendingPathComponent(outputFolderName, isDirectory: true)
+        }
         return documents.appendingPathComponent("ImportedIPAs", isDirectory: true)
     }
 
@@ -694,6 +849,56 @@ final class AppViewModel: ObservableObject {
         return false
     }
 
+    private func writeFallbackInfoPlist(for destAppURL: URL, app: InstalledApp) -> Bool {
+        let destInfoURL = destAppURL.appendingPathComponent("Info.plist")
+        if FileManager.default.fileExists(atPath: destInfoURL.path) {
+            return true
+        }
+        let executableName = guessExecutableName(in: destAppURL)
+            ?? destAppURL.deletingPathExtension().lastPathComponent
+        let plist: [String: Any] = [
+            "CFBundleIdentifier": app.bundleId,
+            "CFBundleExecutable": executableName,
+            "CFBundleName": app.name,
+            "CFBundleDisplayName": app.name,
+            "CFBundlePackageType": "APPL",
+            "CFBundleShortVersionString": "1.0",
+            "CFBundleVersion": "1"
+        ]
+        do {
+            try FileManager.default.createDirectory(
+                at: destInfoURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+            let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0)
+            try data.write(to: destInfoURL)
+            return true
+        } catch {
+            appendLog("Info.plist 暫定生成失敗: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func guessExecutableName(in appURL: URL) -> String? {
+        guard let items = try? FileManager.default.contentsOfDirectory(
+            at: appURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+        for item in items {
+            if item.lastPathComponent == "Info.plist" { continue }
+            let isDirectory = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            if isDirectory { continue }
+            if item.pathExtension.isEmpty {
+                return item.lastPathComponent
+            }
+        }
+        return nil
+    }
+
     private func writeSkippedFilesLog(for appName: String, skipped: [String], in directory: URL) throws -> URL {
         let safeName = appName.replacingOccurrences(of: "/", with: "_")
         let fileName = "skipped-\(safeName)-\(Int(Date().timeIntervalSince1970)).txt"
@@ -701,6 +906,134 @@ final class AppViewModel: ObservableObject {
         let body = skipped.joined(separator: "\n")
         try body.write(to: url, atomically: true, encoding: .utf8)
         return url
+    }
+
+    private func analyzeSkippedFiles(_ skipped: [String], in appURL: URL) -> [String] {
+        var warnings: [String] = []
+        let lowercased = skipped.map { $0.lowercased() }
+        if lowercased.contains(where: { $0.hasSuffix("info.plist") }) {
+            warnings.append("Info.plist がコピーできていません")
+        }
+        if lowercased.contains(where: { $0.contains("/frameworks/") || $0.contains("\\frameworks\\") }) {
+            warnings.append("Frameworks 内のファイルがスキップされています")
+        }
+        if lowercased.contains(where: { $0.contains("/plugins/") || $0.contains("/plug-ins/") }) {
+            warnings.append("PlugIns 内のファイルがスキップされています")
+        }
+        if lowercased.contains(where: { $0.contains("embedded.mobileprovision") }) {
+            warnings.append("embedded.mobileprovision がコピーできていません")
+        }
+        if let executable = guessExecutableName(in: appURL) {
+            if lowercased.contains(where: { $0.hasSuffix("/\(executable.lowercased())") || $0 == executable.lowercased() }) {
+                warnings.append("実行ファイルがスキップされています")
+            }
+        }
+        return warnings
+    }
+
+    private func validateIPA(at url: URL) -> [String] {
+        var warnings: [String] = []
+        let fileManager = FileManager.default
+        let tempRoot = fileManager.temporaryDirectory.appendingPathComponent("IPAValidate-\(UUID().uuidString)")
+        do {
+            try fileManager.createDirectory(at: tempRoot, withIntermediateDirectories: true, attributes: nil)
+            try fileManager.unzipItem(at: url, to: tempRoot)
+            let payloadURL = tempRoot.appendingPathComponent("Payload", isDirectory: true)
+            guard let enumerator = fileManager.enumerator(at: payloadURL, includingPropertiesForKeys: nil) else {
+                warnings.append("Payload が見つかりません")
+                return warnings
+            }
+            var appURL: URL?
+            for case let itemURL as URL in enumerator where itemURL.pathExtension == "app" {
+                appURL = itemURL
+                break
+            }
+            guard let appURL else {
+                warnings.append("Payload 内に .app がありません")
+                return warnings
+            }
+            let infoURL = appURL.appendingPathComponent("Info.plist")
+            guard fileManager.fileExists(atPath: infoURL.path) else {
+                warnings.append("Info.plist がありません")
+                return warnings
+            }
+            let data = try Data(contentsOf: infoURL)
+            let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+            guard let info = plist else {
+                warnings.append("Info.plist が読み取れません")
+                return warnings
+            }
+            if info["CFBundleIdentifier"] == nil {
+                warnings.append("CFBundleIdentifier がありません")
+            }
+            if let executable = info["CFBundleExecutable"] as? String {
+                let exeURL = appURL.appendingPathComponent(executable)
+                if !fileManager.fileExists(atPath: exeURL.path) {
+                    warnings.append("実行ファイルが見つかりません")
+                }
+            } else {
+                warnings.append("CFBundleExecutable がありません")
+            }
+        } catch {
+            warnings.append("検証失敗: \(error.localizedDescription)")
+        }
+        try? fileManager.removeItem(at: tempRoot)
+        return warnings
+    }
+
+    private func directorySize(for url: URL) -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]) else { continue }
+            guard values.isRegularFile == true else { continue }
+            total += Int64(values.fileSize ?? 0)
+        }
+        return total
+    }
+
+    private func outputFileName(for app: InstalledApp) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let date = formatter.string(from: Date())
+        let template = outputNameTemplate.isEmpty ? "{name}" : outputNameTemplate
+        let replaced = template
+            .replacingOccurrences(of: "{name}", with: app.name)
+            .replacingOccurrences(of: "{bundle}", with: app.bundleId)
+            .replacingOccurrences(of: "{date}", with: date)
+            .replacingOccurrences(of: "{id}", with: app.id)
+        let safe = sanitizeFileName(replaced)
+        return safe.hasSuffix(".ipa") ? safe : "\(safe).ipa"
+    }
+
+    private func sanitizeFileName(_ value: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/\\:?\"<>|")
+        let sanitized = value.components(separatedBy: invalid).joined(separator: "_")
+        return sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func writeOperationLog(for label: String, in directory: URL) -> URL? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let safeLabel = sanitizeFileName(label)
+        let fileName = "log-\(safeLabel)-\(formatter.string(from: Date())).txt"
+        let url = directory.appendingPathComponent(fileName)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+            try logText.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            appendLog("ログ保存失敗: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func recordHistory(message: String, detail: String?, relatedURLs: [URL], isError: Bool) {
+        guard enableHistory else { return }
+        let item = HistoryItem(date: Date(), message: message, detail: detail, relatedURLs: relatedURLs, isError: isError)
+        historyItems.insert(item, at: 0)
     }
 
     private func fetchAppsViaLSApplicationWorkspace() -> [InstalledApp] {

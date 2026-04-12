@@ -273,22 +273,23 @@ struct ContentView: View {
             } else {
                 ForEach(viewModel.availableIPAs, id: \.path) { url in
                     HStack {
-                        Button {
-                            viewModel.selectIPA(url)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(url.lastPathComponent)
-                                    .lineLimit(1)
-                                Text(url.deletingLastPathComponent().path)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(url.lastPathComponent)
+                                .lineLimit(1)
+                            Text(url.deletingLastPathComponent().path)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
                         Spacer()
                         Button("削除") {
                             viewModel.requestDeleteIPA(url)
                         }
+                        .buttonStyle(.borderless)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        viewModel.selectIPA(url)
                     }
                 }
             }
@@ -328,6 +329,7 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            viewModel.cancelDeleteIPA()
             viewModel.refreshAvailableIPAs()
         }
     }
