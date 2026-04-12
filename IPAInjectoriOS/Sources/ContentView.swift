@@ -4,6 +4,12 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var isShowingMenu = false
+    private let historyDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy/MM/dd HH:mm"
+        return formatter
+    }()
 
     var body: some View {
         Group {
@@ -33,6 +39,13 @@ struct ContentView: View {
             .padding(16)
         }
         .navigationTitle("IPA一括生成")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("メニュー") {
+                    isShowingMenu = true
+                }
+            }
+        }
         .sheet(isPresented: $viewModel.isImportingDylibs) {
             DylibFilePicker { result in
                 viewModel.isImportingDylibs = false
@@ -47,11 +60,21 @@ struct ContentView: View {
             }
             .ignoresSafeArea()
         }
+        .sheet(isPresented: $viewModel.isImportingIcon) {
+            IconFilePicker { result in
+                viewModel.isImportingIcon = false
+                viewModel.handleIconSelection(result)
+            }
+            .ignoresSafeArea()
+        }
         .sheet(isPresented: $viewModel.isSelectingIPAList) {
             ipaListSheet
         }
         .sheet(isPresented: $viewModel.isSelectingInstalledApps) {
             installedAppsSheet
+        }
+        .sheet(isPresented: $isShowingMenu) {
+            menuSheet
         }
     }
 
@@ -348,6 +371,156 @@ struct ContentView: View {
         }
     }
 
+    private var menuSheet: some View {
+        Group {
+            if #available(iOS 16.0, *) {
+                NavigationStack {
+                    menuContent
+                }
+            } else {
+                NavigationView {
+                    menuContent
+                }
+            }
+        }
+    }
+
+    private var menuContent: some View {
+        List {
+            Section("機能") {
+                Toggle("作業履歴ビュー", isOn: $viewModel.enableHistory)
+                Toggle("フィルタ／並び替え", isOn: $viewModel.enableFilters)
+                Toggle("バッチ吸い出し", isOn: $viewModel.enableBatchExport)
+                Toggle("スキップ一覧の自動解析", isOn: $viewModel.enableSkipAnalysis)
+                Toggle("ZIP検証とIPA検証", isOn: $viewModel.enableValidation)
+                Toggle("出力先のカスタム", isOn: $viewModel.enableOutputFolder)
+                Toggle("dylibのプリセット", isOn: $viewModel.enableDylibPresets)
+                Toggle("アイコン・表示名の上書き", isOn: $viewModel.enableNameIconOverride)
+            }
+
+            Section("出力先") {
+                TextField("保存先フォルダ名", text: $viewModel.outputFolderName)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!viewModel.enableOutputFolder)
+                TextField("命名ルール（{name} / {bundle} / {date}）", text: $viewModel.outputNameTemplate)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!viewModel.enableOutputFolder)
+                Text("例: {name}-{date}")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("並び替え") {
+                Picker("順序", selection: $viewModel.installedAppSort) {
+                    ForEach(AppSortOrder.allCases) { order in
+                        Text(order.title).tag(order)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!viewModel.enableFilters)
+            }
+
+            Section("dylibプリセット") {
+                if viewModel.dylibPresets.isEmpty {
+                    Text("プリセットはまだありません")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.dylibPresets) { preset in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(preset.name)
+                                Text("\(preset.paths.count) 件")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("適用") {
+                                viewModel.applyDylibPreset(preset)
+                            }
+                            Button("削除") {
+                                viewModel.deleteDylibPreset(preset)
+                            }
+                        }
+                    }
+                }
+                HStack {
+                    TextField("プリセット名", text: $viewModel.newPresetName)
+                        .textFieldStyle(.roundedBorder)
+                    Button("保存") {
+                        viewModel.saveDylibPreset()
+                    }
+                }
+                .disabled(!viewModel.enableDylibPresets)
+            }
+
+            Section("表示名・アイコン") {
+                TextField("表示名の上書き", text: $viewModel.overrideDisplayName)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!viewModel.enableNameIconOverride)
+                HStack {
+                    Text(viewModel.overrideIconURL?.lastPathComponent ?? "アイコン未選択")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("選択") {
+                        viewModel.startIconImport()
+                    }
+                    .disabled(!viewModel.enableNameIconOverride)
+                    if viewModel.overrideIconURL != nil {
+                        Button("クリア") {
+                            viewModel.overrideIconURL = nil
+                        }
+                        .disabled(!viewModel.enableNameIconOverride)
+                    }
+                }
+                Text("表示名・アイコンの上書きは今後の実装予定です")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if viewModel.enableHistory {
+                Section("作業履歴") {
+                    if viewModel.historyItems.isEmpty {
+                        Text("履歴はまだありません")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.historyItems) { item in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(item.message)
+                                    .foregroundStyle(item.isError ? .red : .primary)
+                                if let detail = item.detail, !detail.isEmpty {
+                                    Text(detail)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(historyDateFormatter.string(from: item.date))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if !item.relatedURLs.isEmpty {
+                                    ForEach(item.relatedURLs, id: \.path) { url in
+                                        Text(url.lastPathComponent)
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("メニュー")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("閉じる") {
+                    isShowingMenu = false
+                }
+            }
+        }
+    }
+
     private var installedAppsContent: some View {
         List {
             HStack {
@@ -357,6 +530,15 @@ struct ContentView: View {
                     .textFieldStyle(.roundedBorder)
             }
             .padding(.vertical, 4)
+
+            if viewModel.enableFilters {
+                Picker("並び替え", selection: $viewModel.installedAppSort) {
+                    ForEach(AppSortOrder.allCases) { order in
+                        Text(order.title).tag(order)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
 
             if viewModel.installedApps.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
@@ -372,8 +554,26 @@ struct ContentView: View {
             } else {
                 ForEach(viewModel.filteredInstalledApps()) { app in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(app.name)
-                            .lineLimit(1)
+                        HStack {
+                            if viewModel.enableBatchExport {
+                                Toggle(
+                                    "",
+                                    isOn: Binding(
+                                        get: { viewModel.selectedInstalledAppIDs.contains(app.id) },
+                                        set: { newValue in
+                                            if newValue {
+                                                viewModel.selectedInstalledAppIDs.insert(app.id)
+                                            } else {
+                                                viewModel.selectedInstalledAppIDs.remove(app.id)
+                                            }
+                                        }
+                                    )
+                                )
+                                .labelsHidden()
+                            }
+                            Text(app.name)
+                                .lineLimit(1)
+                        }
                         Text(app.bundleId)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -391,6 +591,13 @@ struct ContentView: View {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("閉じる") {
                     viewModel.isSelectingInstalledApps = false
+                }
+            }
+            if viewModel.enableBatchExport {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("一括吸い出し") {
+                        viewModel.exportSelectedAppsToIPA()
+                    }
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -471,6 +678,39 @@ private struct DylibFilePicker: UIViewControllerRepresentable {
         let dylibType = UTType(filenameExtension: "dylib") ?? .data
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [dylibType], asCopy: true)
         picker.allowsMultipleSelection = true
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        private let onPick: (Result<[URL], Error>) -> Void
+
+        init(onPick: @escaping (Result<[URL], Error>) -> Void) {
+            self.onPick = onPick
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            onPick(.success(urls))
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onPick(.success([]))
+        }
+    }
+}
+
+private struct IconFilePicker: UIViewControllerRepresentable {
+    let onPick: (Result<[URL], Error>) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick)
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.image], asCopy: true)
+        picker.allowsMultipleSelection = false
         picker.delegate = context.coordinator
         return picker
     }

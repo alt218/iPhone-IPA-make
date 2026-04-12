@@ -127,6 +127,7 @@ final class AppViewModel: ObservableObject {
     @Published var isSelectingIPAList = false
     @Published var isSelectingInstalledApps = false
     @Published var isImportingDylibs = false
+    @Published var isImportingIcon = false
     @Published var isProcessing = false
     @Published var isExportingIPA = false
     @Published var exportStatus = ""
@@ -141,6 +142,7 @@ final class AppViewModel: ObservableObject {
     @Published var dylibPresets: [DylibPreset] = []
     @Published var selectedDylibPresetID: UUID?
     @Published var newPresetName: String = ""
+    @Published var menuSearch: String = ""
 
     var outputDirectoryURL: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("GeneratedIPAs", isDirectory: true)
@@ -225,6 +227,13 @@ final class AppViewModel: ObservableObject {
         isImportingIPA = false
         DispatchQueue.main.async {
             self.isImportingIPA = true
+        }
+    }
+
+    func startIconImport() {
+        isImportingIcon = false
+        DispatchQueue.main.async {
+            self.isImportingIcon = true
         }
     }
 
@@ -412,6 +421,25 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func exportSelectedAppsToIPA() {
+        let targets = installedApps.filter { selectedInstalledAppIDs.contains($0.id) }
+        guard !targets.isEmpty else {
+            appendLog("一括吸い出し: 対象がありません")
+            return
+        }
+        appendLog("一括吸い出し開始: \(targets.count) 件")
+        Task {
+            for app in targets {
+                await MainActor.run {
+                    self.exportInstalledAppToIPA(app)
+                }
+            }
+            await MainActor.run {
+                self.appendLog("一括吸い出し完了")
+            }
+        }
+    }
+
     func requestDeleteIPA(_ url: URL) {
         pendingDeleteIPA = url
         isConfirmingDelete = true
@@ -471,6 +499,27 @@ final class AppViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             appendLog("dylib追加失敗: \(error.localizedDescription)")
+        }
+    }
+
+    func handleIconSelection(_ result: Result<[URL], Error>) {
+        do {
+            guard let sourceURL = try result.get().first else { return }
+            let accessed = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if accessed {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
+            }
+            let destDir = iconStorageDirectory()
+            try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true, attributes: nil)
+            let destURL = uniqueDestinationURL(in: destDir, name: sourceURL.lastPathComponent)
+            try FileManager.default.copyItem(at: sourceURL, to: destURL)
+            overrideIconURL = destURL
+            appendLog("アイコン上書き: \(destURL.lastPathComponent)")
+        } catch {
+            errorMessage = error.localizedDescription
+            appendLog("アイコン上書き失敗: \(error.localizedDescription)")
         }
     }
 
@@ -708,6 +757,9 @@ final class AppViewModel: ObservableObject {
 
     private func isLikelyRootlessOnly(apps: [InstalledApp]) -> Bool {
         guard !apps.isEmpty else { return false }
+        if isRootlessEnvironment() {
+            return true
+        }
         let jbApps = apps.filter {
             let path = $0.appURL.path
             return path.hasPrefix("/var/jb/Applications") || path.hasPrefix("/private/var/jb/Applications")
@@ -751,6 +803,11 @@ final class AppViewModel: ObservableObject {
     private func dylibStorageDirectory() -> URL {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return documents.appendingPathComponent("ImportedDylibs", isDirectory: true)
+    }
+
+    private func iconStorageDirectory() -> URL {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return documents.appendingPathComponent("ImportedIcons", isDirectory: true)
     }
 
     private func uniqueDestinationURL(in directory: URL, name: String) -> URL {
@@ -1077,6 +1134,46 @@ final class AppViewModel: ObservableObject {
         guard enableHistory else { return }
         let item = HistoryItem(date: Date(), message: message, detail: detail, relatedURLs: relatedURLs, isError: isError)
         historyItems.insert(item, at: 0)
+    }
+
+    func saveDylibPreset() {
+        let trimmed = newPresetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            appendLog("プリセット名を入力してください")
+            return
+        }
+        let paths = dylibURLs.map { $0.path }
+        guard !paths.isEmpty else {
+            appendLog("プリセットに登録するdylibがありません")
+            return
+        }
+        let preset = DylibPreset(name: trimmed, paths: paths)
+        dylibPresets.append(preset)
+        persistDylibPresets()
+        newPresetName = ""
+        appendLog("プリセット保存: \(preset.name)")
+    }
+
+    func applyDylibPreset(_ preset: DylibPreset) {
+        let urls = preset.paths.map { URL(fileURLWithPath: $0) }.filter { FileManager.default.fileExists(atPath: $0.path) }
+        dylibURLs = urls
+        selectedDylibPresetID = preset.id
+        appendLog("プリセット適用: \(preset.name)")
+    }
+
+    func deleteDylibPreset(_ preset: DylibPreset) {
+        dylibPresets.removeAll { $0.id == preset.id }
+        if selectedDylibPresetID == preset.id {
+            selectedDylibPresetID = nil
+        }
+        persistDylibPresets()
+        appendLog("プリセット削除: \(preset.name)")
+    }
+
+    private func persistDylibPresets() {
+        if let data = try? JSONEncoder().encode(dylibPresets) {
+            settings.saveDylibPresetsData(data)
+        }
     }
 
     private func fetchAppsViaLSApplicationWorkspace() -> [InstalledApp] {
