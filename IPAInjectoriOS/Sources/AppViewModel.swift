@@ -907,11 +907,6 @@ final class AppViewModel: ObservableObject {
             } catch {
                 lastError = error
                 appendLog("コピー失敗（直コピー）: \(error.localizedDescription)")
-                if requestRootCopy(from: sourceURL, to: destination) {
-                    detectedExecutable = guessExecutableName(in: sourceURL)
-                    appendLog("コピー完了（root）")
-                    return (skippedFiles, detectedExecutable)
-                }
                 do {
                     skippedFiles = try copyDirectorySkippingUnreadable(
                         from: sourceURL,
@@ -1242,77 +1237,6 @@ final class AppViewModel: ObservableObject {
         return result == 0
     }
 
-    private func requestRootCopy(from source: URL, to destination: URL) -> Bool {
-        guard let requestURL = writeRootCopyRequest(from: source, to: destination) else {
-            return false
-        }
-        appendLog("rootコピー要求: \(requestURL.path)")
-        appendLog("rootコピー待機中...")
-        return waitForRootCopyResult(id: requestURL.deletingPathExtension().lastPathComponent)
-    }
-
-    private func writeRootCopyRequest(from source: URL, to destination: URL) -> URL? {
-        let requestsDir = rootCopyRequestsDirectory()
-        do {
-            try FileManager.default.createDirectory(at: requestsDir, withIntermediateDirectories: true, attributes: nil)
-        } catch {
-            appendLog("rootコピー要求作成失敗: \(error.localizedDescription)")
-            return nil
-        }
-        let id = UUID().uuidString
-        let requestURL = requestsDir.appendingPathComponent("\(id).txt")
-        let body = [
-            "id=\(id)",
-            "source=\(source.path)",
-            "destination=\(destination.path)"
-        ].joined(separator: "\n")
-        do {
-            try body.write(to: requestURL, atomically: true, encoding: .utf8)
-            return requestURL
-        } catch {
-            appendLog("rootコピー要求作成失敗: \(error.localizedDescription)")
-            return nil
-        }
-    }
-
-    private func waitForRootCopyResult(id: String) -> Bool {
-        let resultsDir = rootCopyResultsDirectory()
-        let resultURL = resultsDir.appendingPathComponent("\(id).txt")
-        let deadline = Date().addingTimeInterval(60)
-        while Date() < deadline {
-            if let text = try? String(contentsOf: resultURL, encoding: .utf8) {
-                let lines = text.split(separator: "\n")
-                var status: String?
-                var message: String?
-                for line in lines {
-                    if line.hasPrefix("status=") {
-                        status = String(line.dropFirst("status=".count))
-                    } else if line.hasPrefix("message=") {
-                        message = String(line.dropFirst("message=".count))
-                    }
-                }
-                if status == "ok" {
-                    return true
-                }
-                let detail = message ?? "unknown"
-                appendLog("rootコピー失敗: \(detail)")
-                return false
-            }
-            Thread.sleep(forTimeInterval: 0.5)
-        }
-        appendLog("rootコピー失敗: タイムアウト")
-        return false
-    }
-
-    private func rootCopyRequestsDirectory() -> URL {
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return documents.appendingPathComponent("RootCopyRequests", isDirectory: true)
-    }
-
-    private func rootCopyResultsDirectory() -> URL {
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return documents.appendingPathComponent("RootCopyResults", isDirectory: true)
-    }
 
     private func writeSkippedFilesLog(for appName: String, skipped: [String], in directory: URL) throws -> URL {
         let safeName = appName.replacingOccurrences(of: "/", with: "_")
