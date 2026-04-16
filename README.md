@@ -22,6 +22,10 @@
 - IPA検証（Payload/Info.plist/実行ファイルの存在チェック）
 - アイコン差し替え用の画像インポート（準備中）
 
+## バグ修正
+- roothideではメインバイナリをうまく取得できずIPAを吸い出せません。
+- rootlessではアプリ一覧がうまく取得できず一部のアプリしか吸い出せません
+
 ##　サポート環境
 - IOS15以上
 - rootless roothide 未脱獄
@@ -32,24 +36,6 @@
 - ZIP: ZIPFoundation
 - Mach-O編集: Swiftによる独自実装
 - プロジェクト生成: XcodeGen
-
-## ローカルセットアップ
-
-```bash
-brew install xcodegen
-xcodegen generate
-open IPAInjectoriOS.xcodeproj
-```
-
-## GitHub Actions
-
-`.github/workflows/build-ios.yml` では、macOSランナー上で次の処理を行います。
-
-1. `xcodegen generate` を実行
-2. `iphoneos` 向けにReleaseビルド
-3. `Payload/*.app` を `.ipa` にパッケージ
-4. 生成したIPAをArtifactとしてアップロード
-5. AppIcon用の画像をビルド時に正規化
 
 ## 注意事項
 
