@@ -30,13 +30,6 @@
 - IOS15以上
 - rootless roothide 未脱獄
 
-## 技術スタック
-
-- UI: SwiftUI
-- ZIP: ZIPFoundation
-- Mach-O編集: Swiftによる独自実装
-- プロジェクト生成: XcodeGen
-
 ## 注意事項
 
 - コード署名やプロビジョニングは行いません
